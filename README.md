@@ -119,7 +119,7 @@ git commit ─▶ poll (GIT_POLL_SECONDS) or POST /api/hooks/git ─▶ git fetc
 | `ALLOW_PRIVATE_NETWORK` | `false` | Allow the proxy to reach private IPs (SSRF guard) |
 | `MEDIA_CACHE_MAX_GB` / `MEDIA_CACHE_TTL_HOURS` | `10` / `24` | yt-dlp download cache |
 
-API: `GET /api/health`, `GET /api/version`, `GET /api/proxy?url=` (Range-aware streaming proxy), `GET /api/resolve?url=` (follows redirects, e.g. `f.io` short links → `{url}`), `POST /api/media/jobs {url}` → `GET /api/media/jobs/:id[/file]` (yt-dlp), `POST /api/hooks/git`, `GET /extension.zip`. `/api/proxy`, `/api/resolve` and `/api/media/*` reject private-network targets unless `ALLOW_PRIVATE_NETWORK=true`.
+API: `GET /api/health`, `GET /api/version`, `GET /api/proxy?url=` (Range-aware streaming proxy), `GET /api/resolve?url=` (follows redirects, e.g. `f.io` short links → `{url}`), `POST /api/media/jobs {url}` → `GET /api/media/jobs/:id[/file]` (yt-dlp), `POST /api/hooks/git`, `GET /extension.zip`. `/api/proxy`, `/api/resolve` and `/api/media/*` reject private-network targets unless `ALLOW_PRIVATE_NETWORK=true` (including IPv6 spellings of private IPv4 addresses such as `[::ffff:127.0.0.1]`, re-checked on every redirect hop).
 
 ---
 
@@ -135,7 +135,7 @@ src/studio/     React UI (campaigns, workspace, clip grid, editor, schedule, bra
 src/extension/  MV3: MAIN-world Vyro hook, content overlay, background worker, popup, studio bridge
 server/         Node HTTP server (no npm deps) + auto-update supervisor
 scripts/        extension build, icon generator, build info
-tests/unit      Vitest (core + audio DSP)          tests/e2e   real-Chrome end-to-end (Playwright)
+tests/unit      Vitest (core, audio DSP, server SSRF guard)   tests/e2e   real-Chrome end-to-end (Playwright)
 ```
 
 Privacy: campaigns, transcripts and videos stay in the browser (IndexedDB + Origin Private File System). Only model weights are fetched (Hugging Face) and, if you configure them, your own API providers.

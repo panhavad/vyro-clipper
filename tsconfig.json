@@ -27,5 +27,7 @@
     "useDefineForClassFields": true,
     "skipLibCheck": true
   },
-  "include": ["src", "tests/unit"]
+  "include": ["src", "tests/unit"],
+  // Server tests import Node-only modules; tsconfig.node.json checks them.
+  "exclude": ["tests/unit/server"]
 }

@@ -145,7 +145,12 @@ function sendFile(req: IncomingMessage, res: ServerResponse, file: string) {
 }
 
 function serveStatic(req: IncomingMessage, res: ServerResponse, pathname: string) {
-  const decoded = decodeURIComponent(pathname);
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(pathname);
+  } catch {
+    throw new HttpError(400, 'Malformed URL');
+  }
   const target = normalize(join(STATIC_DIR, decoded));
   const rel = relative(STATIC_DIR, target);
   if (rel.startsWith('..') || rel.includes(`..${sep}`)) throw new HttpError(403, 'Forbidden');
@@ -212,8 +217,14 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
     return json(res, 200, { url: await resolveRedirects(target, ALLOW_PRIVATE) });
   }
   if (path === '/api/media/jobs' && req.method === 'POST') {
-    const body = JSON.parse((await readBody(req)).toString() || '{}') as { url?: string };
-    if (!body.url) throw new HttpError(400, 'url required');
+    let body: { url?: string };
+    try {
+      body = JSON.parse((await readBody(req)).toString() || '{}') as { url?: string };
+    } catch (err) {
+      if (err instanceof HttpError) throw err;
+      throw new HttpError(400, 'Invalid JSON body');
+    }
+    if (!body?.url) throw new HttpError(400, 'url required');
     const job = await jobs.create(body.url);
     return json(res, 201, { id: job.id, status: job.status });
   }
