@@ -31,7 +31,11 @@ export interface PipelineDeps {
 
 export async function getProjectFile(project: Project): Promise<File> {
   const file = project.source.storedAs ? await readMedia(project.source.storedAs) : undefined;
-  if (!file) throw new Error('Source video is missing from browser storage. Re-add the file to this project.');
+  if (!file) {
+    throw new Error(
+      project.source.kind === 'url' ? 'The source video is no longer in browser storage.' : 'Source video is missing from browser storage. Re-add the file to this project.',
+    );
+  }
   return file;
 }
 
