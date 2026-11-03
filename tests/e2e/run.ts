@@ -174,6 +174,13 @@ async function main() {
     assert(cards >= 2, 'at least two clips');
     assert(scores.every((s) => Number(s) >= 1 && Number(s) <= 99), 'scores within 1..99');
     assert(compliance.some((c) => /Campaign rules/.test(c)), 'at least one clip passes campaign rules');
+    const textScan = await page.evaluate(() => {
+      type S = { projects: Array<{ textScan?: { captions: boolean; frames: number }; clips: Array<{ edit: { captionsEnabled: boolean } }> }> };
+      const p = (window as unknown as { __vyroclipper: { getState(): S } }).__vyroclipper.getState().projects[0]!;
+      return { scanned: p.textScan?.frames ?? 0, burnedIn: p.textScan?.captions, ourCaptions: p.clips.every((c) => c.edit.captionsEnabled) };
+    });
+    log('burned-in text scan:', textScan);
+    assert(textScan.scanned > 0 && textScan.burnedIn === false && textScan.ourCaptions, 'caption-free source keeps animated captions');
 
     // Editor
     await page.locator('.clip-card').first().getByRole('button', { name: 'Edit' }).click();

@@ -41,6 +41,8 @@ const campaign = (n: number) => ({
     subtitles: { required: n % 2 === 0 },
   },
   media: { links: [{ url: `https://cdn.example.com/source-${n}.mp4` }] },
+  enrolled: n % 4 === 0,
+  isLocked: n === 15,
 });
 const ALL = Array.from({ length: 15 }, (_, i) => campaign(i + 1));
 
@@ -141,6 +143,10 @@ async function main() {
     const items = await popup.locator('.item').count();
     log('popup items:', items);
     assert(items === 15, 'popup lists all campaigns');
+    const joined = await popup.locator('.item .tag.good').count();
+    const locked = await popup.locator('.item .tag', { hasText: 'Locked' }).count();
+    log('popup tags:', { joined, locked });
+    assert(joined === 3 && locked === 1, 'popup shows joined / locked campaigns');
     await popup.screenshot({ path: join(ART, 'ext-popup.png') });
 
     // 3) "Clip this campaign" on a campaign page opens the studio with it selected
