@@ -18,6 +18,7 @@ Everything heavy runs **client-side in your browser** (WebGPU/WASM Whisper, Medi
 - **Virality Score™-style scoring (0–99)** with Hook / Flow / Value / Trend sub-scores, campaign *On-brief* relevance and plain-language reasons (“Opens with a question”, “Energetic opening (+38% louder)”, “Story arc (setup → payoff)”…).
 - Built-in engine works **offline**: sentence-aligned candidates scored from the transcript (hooks, curiosity gaps, numbers/stakes, emotion, storytelling, pacing, completeness) and the audio loudness envelope; non-overlapping top picks.
 - **ClipAnything-style prompts** (“find moments about money challenges”), clip count, length range and timeframe controls.
+- Titles and hook cards are picked from the clip's most specific, punchiest line, and are never repeated within a batch.
 - Optional **LLM clip picking** with any OpenAI-compatible model (OpenAI, Groq, OpenRouter, Ollama, LM Studio) — the LLM returns sentence indices (no hallucinated timestamps), scores are blended 60/40 with the signal-based engine.
 - Fallback for no-speech sources (gameplay/music) using audio energy.
 
@@ -160,11 +161,15 @@ npx playwright-core install chromium
 node tests/e2e/extension.ts   # extension in Playwright Chromium (branded Chrome ignores --load-extension)
 # Real campaign against a running studio: import a Vyro API JSON → browse Frame.io → clip → export
 E2E_CAMPAIGN_JSON=catalog.json E2E_CAMPAIGN="Joy 101" STUDIO_URL=http://127.0.0.1:8080 node tests/e2e/campaign-source.ts
+#   options: E2E_FILE="Harry Connick" (pick a file), E2E_PERSISTENT=1 (normal profile), E2E_EXPECT_BURNED_IN=0|1,
+#            E2E_EVICT=1 (delete the stored source before export: it must be downloaded again), E2E_TIMEOUT_MIN=55
 ```
 
 ## Notes & limits
 
 - Use the latest **Chrome/Edge** (WebCodecs, WebGPU, OPFS). First transcription downloads the speech model once.
+- In-browser Whisper runs at roughly 1.5–3× real time on a typical GPU (a 47-min episode ≈ 30 min). For long sources, cloud speech-to-text (OpenAI/Groq-compatible, *Settings*) is much faster.
+- Videos are kept in the browser's private storage. **Incognito windows allow only ~1 GB per site**: big Frame.io sources then fall back to Frame.io's smaller H.264 copies automatically. If the browser ever evicts a stored video (or you clear site data), projects created from a link **download their source again** when you process, preview or export.
 - YouTube/TikTok/Instagram/X source links need the Docker server (yt-dlp). Google Drive *folders*, web pages and password-protected Frame.io shares must be downloaded manually and dropped in.
 - Burned-in caption detection is heuristic (tuned on real campaign footage); if it guesses wrong, flip **Animated captions** in the editor.
 - Platform sounds required by a campaign must be added in the TikTok/Instagram app when posting (the checklist reminds you).

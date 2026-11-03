@@ -41,7 +41,11 @@ async function main() {
     : await browser!.newContext({ acceptDownloads: true, viewport: { width: 1500, height: 1100 } });
   const page = await context.newPage();
   const errors: string[] = [];
+  const pipelineWarnings: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
+  page.on('console', (m) => {
+    if (m.type() === 'warning' && /failed/i.test(m.text())) pipelineWarnings.push(m.text().slice(0, 200));
+  });
   try {
     await page.goto(STUDIO);
     await page.getByRole('heading', { name: 'Campaigns', exact: true }).waitFor();
@@ -75,16 +79,21 @@ async function main() {
     const deadline = Date.now() + Number(process.env.E2E_TIMEOUT_MIN ?? 30) * 60 * 1000;
     for (;;) {
       if (Date.now() > deadline) throw new Error('timeout');
-      const err = await page.locator('.project .callout.error').first().textContent({ timeout: 300 }).catch(() => null);
-      if (err) throw new Error(`Pipeline error: ${err}`);
-      const prog = await page.locator('.project .progress-text').first().textContent({ timeout: 300 }).catch(() => null);
-      const cards = await page.locator('.clip-card').count();
-      const s = prog?.replace(/\s+/g, ' ') ?? `${cards} clips`;
+      // Read the store, not the DOM: short DOM-read timeouts miss the progress bar while the page is busy (reframing).
+      const st = await page.evaluate(() => {
+        type S = { jobs: Record<string, { kind: string }>; projects: Array<{ status: string; error?: string; progress?: { step: string; detail?: string }; clips: unknown[] }> };
+        const state = (window as unknown as { __vyroclipper: { getState: () => S } }).__vyroclipper.getState();
+        const p = state.projects[0];
+        if (!p) return undefined;
+        return { status: p.status, error: p.error, step: p.progress ? `${p.progress.step} ${p.progress.detail ?? ''}`.trim() : '', clips: p.clips.length, busy: Object.values(state.jobs).some((j) => j.kind !== 'export') };
+      });
+      if (st?.status === 'error') throw new Error(`Pipeline error: ${st.error}`);
+      const s = st ? `${st.status}${st.step ? ` — ${st.step}` : ''} (${st.clips} clips)` : 'no project yet';
       if (s !== last) {
         log(s);
         last = s;
       }
-      if (!prog && cards > 0) break;
+      if (st && st.status === 'ready' && !st.busy && st.clips > 0) break;
       await page.waitForTimeout(2000);
     }
     await page.waitForTimeout(5000);
@@ -95,16 +104,31 @@ async function main() {
     titles.forEach((t, i) => log(`#${i + 1} ${scores[i]} — ${t} | ${chips[i]?.replace(/\s+/g, ' ')}`));
     const minLen = Number(/≥ (\d+)s/.exec(await page.locator('.chips').first().innerText())?.[1] ?? 0);
     const burnedIn = await page.evaluate(() => {
-      type S = { projects: Array<{ textScan?: { captions: boolean; bands: Array<{ kind: string; y0: number; y1: number }> }; clips: Array<{ hook: string; edit: { captionsEnabled: boolean } }> }> };
+      type S = {
+        projects: Array<{
+          meta?: { width: number; height: number };
+          textScan?: { captions: boolean; bands: Array<{ kind: string; y0: number; y1: number }> };
+          clips: Array<{ title: string; hook: string; edit: { captionsEnabled: boolean }; reframe?: { keyframes: unknown[] } }>;
+        }>;
+      };
       const p = (window as unknown as { __vyroclipper: { getState: () => S } }).__vyroclipper.getState().projects[0]!;
+      const key = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}' ]+/gu, ' ').replace(/\s+/g, ' ').trim();
       return {
         captions: p.textScan?.captions,
         bands: p.textScan?.bands.map((b) => `${b.kind} ${b.y0.toFixed(2)}–${b.y1.toFixed(2)}`),
         ourCaptions: p.clips.map((c) => c.edit.captionsEnabled),
         hooks: p.clips.map((c) => c.hook),
+        landscape: (p.meta?.width ?? 0) > (p.meta?.height ?? 0),
+        reframed: p.clips.filter((c) => (c.reframe?.keyframes.length ?? 0) > 0).length,
+        uniqueTitles: new Set(p.clips.map((c) => key(c.title))).size,
+        uniqueHooks: new Set(p.clips.map((c) => key(c.hook))).size,
+        clips: p.clips.length,
       };
     });
-    log('burned-in text:', burnedIn);
+    log('burned-in text / reframe / titles:', burnedIn, 'pipeline warnings:', pipelineWarnings);
+    assert(burnedIn.uniqueTitles === burnedIn.clips && burnedIn.uniqueHooks === burnedIn.clips, 'every clip has its own title and hook');
+    if (burnedIn.landscape) assert(burnedIn.reframed === burnedIn.clips, `landscape source: all clips face-tracked (${burnedIn.reframed}/${burnedIn.clips})`);
+    assert(!pipelineWarnings.length, 'no pipeline step failed silently');
     if (process.env.E2E_EXPECT_BURNED_IN) {
       const expected = process.env.E2E_EXPECT_BURNED_IN === '1';
       assert(burnedIn.captions === expected, `burned-in captions detected = ${expected}`);

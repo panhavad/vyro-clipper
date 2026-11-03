@@ -64,16 +64,21 @@ async function waitForClips(page: Page, timeoutMs: number) {
   const deadline = Date.now() + timeoutMs;
   let last = '';
   while (Date.now() < deadline) {
-    const progress = await page.locator('.project .progress-text').first().textContent({ timeout: 500 }).catch(() => null);
-    const error = await page.locator('.project .callout.error').first().textContent({ timeout: 200 }).catch(() => null);
-    if (error) throw new Error(`Pipeline error: ${error}`);
-    const cards = await page.locator('.clip-card').count();
-    const status = progress?.replace(/\s+/g, ' ').trim() ?? `${cards} clip cards`;
+    // Read the store, not the DOM: short DOM-read timeouts miss the progress bar while the page is busy (reframing).
+    const s = await page.evaluate(() => {
+      type S = { jobs: Record<string, { kind: string }>; projects: Array<{ status: string; error?: string; progress?: { step: string; detail?: string }; clips: unknown[] }> };
+      const st = (window as unknown as { __vyroclipper?: { getState(): S } }).__vyroclipper?.getState();
+      const p = st?.projects[0];
+      if (!st || !p) return undefined;
+      return { status: p.status, error: p.error, step: p.progress ? `${p.progress.step} ${p.progress.detail ?? ''}`.trim() : '', clips: p.clips.length, busy: Object.values(st.jobs).some((j) => j.kind !== 'export') };
+    });
+    if (s?.status === 'error') throw new Error(`Pipeline error: ${s.error}`);
+    const status = s ? `${s.status}${s.step ? ` — ${s.step}` : ''} (${s.clips} clips)` : 'no project yet';
     if (status !== last) {
       log(status);
       last = status;
     }
-    if (!progress && cards > 0) return cards;
+    if (s && s.status === 'ready' && !s.busy && s.clips > 0) return page.locator('.clip-card').count();
     await page.waitForTimeout(1500);
   }
   throw new Error('Timed out waiting for clips');
@@ -119,8 +124,11 @@ async function main() {
   const context = await browser.newContext({ acceptDownloads: true, viewport: { width: 1500, height: 1100 } });
   const page = await context.newPage();
   const consoleErrors: string[] = [];
+  const pipelineWarnings: string[] = [];
   page.on('console', (m) => {
     if (m.type() === 'error') consoleErrors.push(m.text());
+    // Pipeline steps that degrade silently (centre crop, no text scan, …) must not go unnoticed.
+    if (m.type() === 'warning' && /failed/i.test(m.text())) pipelineWarnings.push(m.text().slice(0, 200));
   });
   page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`));
   const results: Record<string, unknown> = {};
@@ -175,12 +183,21 @@ async function main() {
     assert(scores.every((s) => Number(s) >= 1 && Number(s) <= 99), 'scores within 1..99');
     assert(compliance.some((c) => /Campaign rules/.test(c)), 'at least one clip passes campaign rules');
     const textScan = await page.evaluate(() => {
-      type S = { projects: Array<{ textScan?: { captions: boolean; frames: number }; clips: Array<{ edit: { captionsEnabled: boolean } }> }> };
+      type S = { projects: Array<{ textScan?: { captions: boolean; frames: number }; clips: Array<{ edit: { captionsEnabled: boolean }; reframe?: { keyframes: unknown[] } }> }> };
       const p = (window as unknown as { __vyroclipper: { getState(): S } }).__vyroclipper.getState().projects[0]!;
-      return { scanned: p.textScan?.frames ?? 0, burnedIn: p.textScan?.captions, ourCaptions: p.clips.every((c) => c.edit.captionsEnabled) };
+      return {
+        scanned: p.textScan?.frames ?? 0,
+        burnedIn: p.textScan?.captions,
+        ourCaptions: p.clips.every((c) => c.edit.captionsEnabled),
+        reframed: p.clips.filter((c) => (c.reframe?.keyframes.length ?? 0) > 0).length,
+        clips: p.clips.length,
+      };
     });
-    log('burned-in text scan:', textScan);
+    log('burned-in text scan / reframe:', textScan, 'pipeline warnings:', pipelineWarnings);
     assert(textScan.scanned > 0 && textScan.burnedIn === false && textScan.ourCaptions, 'caption-free source keeps animated captions');
+    // The sample is 16:9, so every clip must have been face-tracked for the 9:16 reframe.
+    assert(textScan.reframed === textScan.clips, `all clips face-tracked (${textScan.reframed}/${textScan.clips})`);
+    assert(!pipelineWarnings.length, 'no pipeline step failed silently');
 
     // Editor
     await page.locator('.clip-card').first().getByRole('button', { name: 'Edit' }).click();
