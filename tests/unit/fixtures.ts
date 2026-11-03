@@ -49,3 +49,47 @@ export const VYRO_CAMPAIGN = {
   media: { links: [{ url: 'https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQr/view?usp=sharing' }, { url: 'youtube.com/watch?v=dQw4w9WgXcQ' }], notes: 'Episode 1 and 2' },
 };
 
+
+// Anonymised object with the exact structure returned by api.vyro.com/catalog/campaigns (Nov 2026).
+export const LIVE_SHAPE_CAMPAIGN = {
+  id: '68f0c0ffee0000000000abcd',
+  createdAt: '2026-10-20T10:00:00.000Z',
+  updatedAt: '2026-11-01T14:10:39.482Z',
+  slug: 'outdoor-adventure-shorts',
+  type: 'clipping',
+  goal: 'views',
+  workspace: { name: 'Outdoor Brand Inc', image: 'https://cdn.vyro.com/ws/outdoor.png' },
+  name: 'Outdoor Adventure Shorts',
+  targeting: { languages: ['en'], platforms: ['tiktok', 'instagram', 'youtube'] },
+  payoutModel: { model: 'CPM', payRate: 2.1, platformRates: {} },
+  budget: { value: 1400, spent: 566.52, remaining: 833.48, platformReserves: {} },
+  visibility: 'public',
+  serviceModel: 'self_serve',
+  requirements: {
+    logo: { urls: [] },
+    text: { caption: 'Tag @outdoorbrand in Tiktok and Instagram posts', hashtags: [], ftcDisclosureHashtags: ['#BrandPartner'] },
+    audio: { links: [] },
+    subtitles: { required: false },
+    video: { minLength: 15 },
+    socialAccount: { requireFreshProfile: false },
+    brief: '<p>Clip the best outdoor adventure moments.</p>',
+    minViewsPerClip: 5000,
+    formats: [{ type: 'INSTAGRAM_REEL', quantity: 1 }],
+    platformRules: { ftcDisclosure: { tiktok: { mode: 'either' }, youtube: { mode: 'either' }, instagram: { mode: 'either' } } },
+    collaboration: { allowCollabAndTagging: true },
+  },
+  media: { links: [{ url: 'https://f.io/QzYflACI' }] },
+  displayOption: { workspaceName: 'Outdoor Brand', workspaceImage: 'https://cdn.vyro.com/ws/outdoor.png' },
+  status: { id: 'active', timestamp: '2026-11-01T14:10:39.482Z' },
+  startDate: '2026-10-21T00:00:00.000Z',
+  endDate: '2026-12-01T00:00:00.000Z',
+  isLocked: false,
+  enrolled: true,
+  restrictions: [],
+  headlineRate: 2.1,
+  headlineRateIsRange: false,
+  reminders: [
+    { group: 'do', rule: "Keep your post's likes and comments on.", source: 'standard', key: 'likes-comments-on' },
+    { group: 'avoid', rule: 'Edits that misrepresent the video or the brand.', source: 'standard', key: 'misrepresent' },
+  ],
+};

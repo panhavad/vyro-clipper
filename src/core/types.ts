@@ -48,12 +48,15 @@ export interface CampaignRules {
   socialAccount?: { displayName?: string; bio?: string; requireFreshProfile?: boolean };
 }
 
-export type MediaKind = 'video' | 'audio' | 'image' | 'youtube' | 'gdrive' | 'gdrive-folder' | 'dropbox' | 'social' | 'page' | 'unknown';
+export type MediaKind = 'video' | 'audio' | 'image' | 'frameio' | 'youtube' | 'gdrive' | 'gdrive-folder' | 'dropbox' | 'social' | 'page' | 'unknown';
 
 export interface MediaLink {
   url: string;
   label?: string;
   kind: MediaKind;
+  /** A specific file inside a multi-file share (e.g. one Frame.io asset) */
+  fileId?: string;
+  size?: number;
 }
 
 export type CampaignSource = 'vyro' | 'manual' | 'demo';
@@ -74,10 +77,20 @@ export interface Campaign {
   submitUrl?: string;
   /** Pay per 1,000 views in USD */
   cpm?: number;
+  /** CPM is a range ("up to") */
+  cpmIsRange?: boolean;
   payoutModel?: string;
   budgetTotal?: number;
   budgetSpent?: number;
   budgetRemaining?: number;
+  /** Views a clip needs before it starts earning */
+  minViewsPerClip?: number;
+  /** Vyro locks campaigns whose budget ran out / that are paused */
+  locked?: boolean;
+  /** The user already joined this campaign on Vyro */
+  enrolled?: boolean;
+  /** Accepted post formats, e.g. INSTAGRAM_REEL */
+  formats?: string[];
   startDate?: string;
   endDate?: string;
   briefHtml?: string;
@@ -290,6 +303,8 @@ export interface Project {
   source: {
     kind: 'file' | 'url';
     url?: string;
+    /** Specific file inside a multi-file share (Frame.io) */
+    fileId?: string;
     fileName?: string;
     size?: number;
     mime?: string;

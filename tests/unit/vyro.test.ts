@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { classifyMediaUrl, directDownloadUrl, findCampaignsInPayload, mergeCampaign, normalizeVyroCampaign, effectiveRules } from '../../src/core/vyro';
-import { VYRO_CAMPAIGN } from './fixtures';
+import { VYRO_CAMPAIGN, LIVE_SHAPE_CAMPAIGN } from './fixtures';
 
 describe('vyro normalizer', () => {
   it('maps the catalog campaign into the internal model', () => {
@@ -55,5 +55,25 @@ describe('vyro normalizer', () => {
     expect(merged.selected).toBe(true);
     expect(effectiveRules(merged).minDurationSec).toBe(45);
     expect(merged.capturedAt).toBe(1);
+  });
+
+  it('handles the live catalog shape (status object, reminders, flexible FTC, caption instructions, Frame.io media)', () => {
+    const c = normalizeVyroCampaign(LIVE_SHAPE_CAMPAIGN);
+    expect(c.status).toBe('active');
+    expect(c.cpm).toBe(2.1);
+    expect(c.budgetRemaining).toBe(833.48);
+    expect(c.minViewsPerClip).toBe(5000);
+    expect(c.locked).toBe(false);
+    expect(c.enrolled).toBe(true);
+    expect(c.formats).toEqual(['INSTAGRAM_REEL']);
+    expect(c.rules.disclosureMode).toBe('flexible');
+    expect(c.rules.disclosureHashtags).toEqual(['#BrandPartner']);
+    // "Tag @x …" in the caption field is an instruction → required mention, not literal caption text.
+    expect(c.rules.caption).toBeUndefined();
+    expect(c.rules.mentions).toContain('@outdoorbrand');
+    expect(c.rules.briefDos[0]).toMatch(/^Tag @outdoorbrand/);
+    expect(c.rules.briefDos).toContain("Keep your post's likes and comments on.");
+    expect(c.rules.briefDonts).toContain('Edits that misrepresent the video or the brand.');
+    expect(c.media[0]!.kind).toBe('frameio');
   });
 });

@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { parseBrief } from '../../core/brief';
+import { resolveFrameioShare, type FrameioShare } from '../../core/frameio';
 import type { Campaign, CampaignRules, MediaLink, Platform } from '../../core/types';
 import { PLATFORMS } from '../../core/types';
 import { classifyMediaUrl, effectiveRules, isDownloadable, needsServerResolver } from '../../core/vyro';
@@ -8,7 +9,7 @@ import { useCampaign } from '../hooks';
 import { useStudio } from '../store';
 import { PlatformIcons, RuleChips } from './CampaignsView';
 import { ProjectSection } from './ProjectParts';
-import { Badge, Button, DropZone, Empty, Field, Tabs, Toggle, formatMoney } from './ui';
+import { Badge, Button, DropZone, Empty, Field, Tabs, Toggle, formatBytes, formatMoney } from './ui';
 
 type Tab = 'clips' | 'rules' | 'brief' | 'media';
 
@@ -93,10 +94,59 @@ function RulesEditor({ campaign }: { campaign: Campaign }) {
   );
 }
 
+function FrameioBrowser({ link, campaign, used, onClip }: { link: MediaLink; campaign: Campaign; used: Set<string>; onClip: (l: MediaLink) => void }) {
+  const [state, setState] = useState<{ loading: boolean; error?: string; share?: FrameioShare }>({ loading: false });
+  const load = async () => {
+    setState({ loading: true });
+    try {
+      setState({ loading: false, share: await resolveFrameioShare(link.url) });
+    } catch (err) {
+      setState({ loading: false, error: (err as Error).message });
+    }
+  };
+  if (!state.share) {
+    return (
+      <Button size="sm" kind="primary" onClick={() => void load()} disabled={state.loading} title={state.error}>
+        {state.loading ? 'Opening…' : state.error ? 'Retry' : '📂 Browse files'}
+      </Button>
+    );
+  }
+  const files = state.share.files.filter((f) => f.kind === 'video' || f.kind === 'audio');
+  return (
+    <div className="share-files">
+      <div className="muted small">
+        {state.share.name ?? 'Frame.io share'} · {files.length} file{files.length === 1 ? '' : 's'} · {formatBytes(files.reduce((n, f) => n + (f.size ?? 0), 0))}
+      </div>
+      {files.map((f) => (
+        <div key={f.id} className="share-file">
+          <span className="media-url" title={f.name}>
+            {f.kind === 'audio' ? '🎧' : '🎬'} {f.name}
+          </span>
+          <span className="muted small">
+            {formatBytes(f.size)}
+            {f.width ? ` · ${f.width}×${f.height}` : ''}
+          </span>
+          {used.has(`${link.url}#${f.id}`) ? (
+            <Badge tone="accent">Added</Badge>
+          ) : (
+            <Button size="sm" kind="primary" disabled={!f.downloadUrl} title={f.downloadUrl ? undefined : 'Downloads are disabled for this file'} onClick={() => onClip({ url: link.url, kind: 'frameio', fileId: f.id, label: f.name, size: f.size })}>
+              ✂ Clip this
+            </Button>
+          )}
+        </div>
+      ))}
+      {!files.length && <span className="muted small">No video files in this share.</span>}
+      <span className="muted small">Campaign: {campaign.name}</span>
+    </div>
+  );
+}
+
 function MediaPanel({ campaign }: { campaign: Campaign }) {
   const { createProjectFromLink, createProjectFromFile, runPipeline, updateCampaign, projects, toast } = useStudio();
   const [url, setUrl] = useState('');
-  const used = new Set(projects.filter((p) => p.campaignId === campaign.id).map((p) => p.source.url));
+  const campaignProjects = projects.filter((p) => p.campaignId === campaign.id);
+  const used = new Set(campaignProjects.map((p) => p.source.url));
+  const usedFiles = new Set(campaignProjects.map((p) => `${p.source.url}#${p.source.fileId ?? ''}`));
   const clipLink = async (link: MediaLink) => {
     try {
       const p = await createProjectFromLink(link, campaign.id);
@@ -113,20 +163,23 @@ function MediaPanel({ campaign }: { campaign: Campaign }) {
       {campaign.media.length === 0 && <p className="muted">This campaign has no source links. Drop the source video below.</p>}
       <div className="media-list">
         {campaign.media.map((m) => (
-          <div key={m.url} className="media-item">
-            <Badge tone={isDownloadable(m.kind) ? 'good' : needsServerResolver(m.kind) ? 'warn' : 'default'}>{m.kind}</Badge>
-            <a href={m.url} target="_blank" rel="noreferrer" className="media-url" title={m.url}>
-              {m.label ?? m.url}
-            </a>
-            {used.has(m.url) ? (
-              <Badge tone="accent">Added</Badge>
-            ) : m.kind === 'gdrive-folder' || m.kind === 'page' || m.kind === 'image' ? (
-              <span className="muted small">Open & download, then drop the file</span>
-            ) : (
-              <Button size="sm" kind="primary" onClick={() => void clipLink(m)} title={needsServerResolver(m.kind) ? 'Downloads through the VyroClipper server (yt-dlp)' : undefined}>
-                ✂ Clip this
-              </Button>
-            )}
+          <div key={m.url} className="media-item column">
+            <div className="row gap center-v">
+              <Badge tone={isDownloadable(m.kind) ? 'good' : needsServerResolver(m.kind) ? 'warn' : 'default'}>{m.kind === 'frameio' ? 'Frame.io' : m.kind}</Badge>
+              <a href={m.url} target="_blank" rel="noreferrer" className="media-url" title={m.url}>
+                {m.label && m.label !== 'added' ? m.label : m.url}
+              </a>
+              {m.kind === 'frameio' ? null : used.has(m.url) ? (
+                <Badge tone="accent">Added</Badge>
+              ) : m.kind === 'gdrive-folder' || m.kind === 'page' || m.kind === 'image' ? (
+                <span className="muted small">Open & download, then drop the file</span>
+              ) : (
+                <Button size="sm" kind="primary" onClick={() => void clipLink(m)} title={needsServerResolver(m.kind) ? 'Downloads through the VyroClipper server (yt-dlp)' : undefined}>
+                  ✂ Clip this
+                </Button>
+              )}
+            </div>
+            {m.kind === 'frameio' && <FrameioBrowser link={m} campaign={campaign} used={usedFiles} onClip={(l) => void clipLink(l)} />}
           </div>
         ))}
       </div>
@@ -184,8 +237,11 @@ export function CampaignView({ id, tab: initialTab }: { id: string; tab?: Tab })
             <div className="muted small">{campaign.brand ?? (campaign.source === 'vyro' ? 'Vyro campaign' : 'Manual campaign')}</div>
             <h1>{campaign.name}</h1>
             <div className="row gap center-v wrap">
-              {campaign.cpm !== undefined && <Badge tone="accent">{formatMoney(campaign.cpm)} / 1K views</Badge>}
+              {campaign.cpm !== undefined && <Badge tone="accent">{campaign.cpmIsRange ? 'up to ' : ''}{formatMoney(campaign.cpm)} / 1K views</Badge>}
               {campaign.budgetRemaining !== undefined && <Badge>{formatMoney(campaign.budgetRemaining)} budget left</Badge>}
+              {campaign.minViewsPerClip ? <Badge title="Views a clip needs before it starts earning">Min {campaign.minViewsPerClip.toLocaleString()} views / clip</Badge> : null}
+              {campaign.enrolled && <Badge tone="good">Joined</Badge>}
+              {campaign.locked && <Badge tone="bad">Locked</Badge>}
               {campaign.endDate && <Badge>Ends {new Date(campaign.endDate).toLocaleDateString()}</Badge>}
               <PlatformIcons platforms={rules.platforms} />
             </div>

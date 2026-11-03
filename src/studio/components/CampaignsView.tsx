@@ -39,7 +39,7 @@ function CampaignCard({ c, clipCount, onToggle }: { c: Campaign; clipCount: numb
   const navigate = useStudio((s) => s.navigate);
   const spentPct = c.budgetTotal ? Math.min(100, ((c.budgetTotal - (c.budgetRemaining ?? c.budgetTotal)) / c.budgetTotal) * 100) : undefined;
   return (
-    <div className={cx('card campaign-card', c.selected && 'selected')}>
+    <div className={cx('card campaign-card', c.selected && 'selected', c.locked && 'locked')}>
       <div className="campaign-top">
         <label className="check" onClick={(e) => e.stopPropagation()}>
           <input type="checkbox" checked={!!c.selected} onChange={(e) => onToggle(e.target.checked)} />
@@ -48,13 +48,18 @@ function CampaignCard({ c, clipCount, onToggle }: { c: Campaign; clipCount: numb
         <div className="campaign-meta" onClick={() => navigate({ name: 'campaign', id: c.id })}>
           <div className="muted small">
             {c.brand ?? (c.source === 'vyro' ? 'Vyro' : 'Manual')} {c.type && c.type !== 'clipping' ? `· ${c.type.toUpperCase()}` : ''}
+            {c.enrolled ? ' · ✓ Joined' : ''}
+            {c.locked ? ' · 🔒 Locked' : ''}
           </div>
           <h3 className="campaign-name">{c.name}</h3>
         </div>
       </div>
       <div className="campaign-stats" onClick={() => navigate({ name: 'campaign', id: c.id })}>
         <div>
-          <span className="stat-big">{c.cpm !== undefined ? formatMoney(c.cpm) : '—'}</span>
+          <span className="stat-big">
+            {c.cpmIsRange ? <span className="small muted">up to </span> : null}
+            {c.cpm !== undefined ? formatMoney(c.cpm) : '—'}
+          </span>
           <span className="muted small"> / 1K views</span>
         </div>
         <PlatformIcons platforms={effectiveRules(c).platforms} />

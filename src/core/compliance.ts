@@ -57,10 +57,14 @@ export function checkCompliance(input: ComplianceInput): ComplianceReport {
   }
   if (rules.disclosureHashtags.length) {
     const has = rules.disclosureHashtags.some((h) => captionLower.includes(normalizeHashtag(h).toLowerCase()));
-    add('disclosure', 'Ad disclosure hashtag', has ? 'pass' : 'fail', rules.disclosureHashtags.join(' '));
+    add('disclosure', 'Ad disclosure hashtag', has ? 'pass' : 'fail', rules.disclosureHashtags.join(' ') + (rules.disclosureMode === 'flexible' ? ' (or the paid-partnership label)' : ''));
   }
-  if (rules.disclosureMode === 'platform' || rules.disclosureMode === 'flexible') {
+  if (rules.disclosureMode === 'platform') {
     add('disclosure-toggle', 'Turn on the platform “Paid partnership / Branded content” toggle when posting', 'manual');
+  }
+  if (rules.mentions.length) {
+    const missing = rules.mentions.filter((m) => !captionLower.includes(m.toLowerCase()));
+    add('mentions', `Tag ${rules.mentions.join(' ')}`, missing.length ? 'warn' : 'pass', missing.length ? `Missing ${missing.join(' ')}` : undefined);
   }
   if (rules.audio.length) {
     add('audio', 'Use the campaign sound in-app when posting', 'manual', rules.audio.map((a) => `${a.platform}: ${a.url}`).join('  ') + (rules.audioNotes ? ` — ${rules.audioNotes}` : ''));

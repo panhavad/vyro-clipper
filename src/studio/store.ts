@@ -3,6 +3,7 @@ import { generateSettingsForCampaign } from '../core/defaults';
 import { shortId } from '../core/text';
 import type { Campaign, Clip, EditSettings, MediaLink, Project } from '../core/types';
 import { manualCampaign, mergeCampaign } from '../core/vyro';
+import { resolveFrameioShare } from '../core/frameio';
 import { fetchMediaToOpfs, MediaFetchError } from '../engine/fetcher';
 import { clipBaseName, downloadFiles, exportClipPackage, saveToDirectory, zipFiles, type ExportedFile } from '../engine/exportService';
 import { detectClips, processProject, rulesFor } from '../engine/pipeline';
@@ -198,8 +199,8 @@ export const useStudio = create<StudioState>((set, get) => {
       const project: Project = {
         id,
         campaignId,
-        name: link.label || (campaign ? `${campaign.name} – source` : 'Linked video'),
-        source: { kind: 'url', url: link.url },
+        name: link.label && link.label !== 'added' ? link.label.replace(/\.[^.]+$/, '') : campaign ? `${campaign.name} – source` : 'Linked video',
+        source: link.fileId ? { kind: 'url', url: link.url, fileId: link.fileId, size: link.size } : { kind: 'url', url: link.url },
         clips: [],
         status: 'downloading',
         progress: { step: 'Downloading source video', pct: 0 },
@@ -376,15 +377,39 @@ export const useStudio = create<StudioState>((set, get) => {
     async clipCampaign(campaignId) {
       const campaign = get().campaigns.find((c) => c.id === campaignId);
       if (!campaign) return;
-      const videoLinks = campaign.media.filter((m) => ['video', 'gdrive', 'dropbox', 'youtube', 'social'].includes(m.kind));
+      const videoLinks = campaign.media.filter((m) => ['video', 'gdrive', 'dropbox', 'youtube', 'social', 'frameio'].includes(m.kind));
       if (!videoLinks.length) {
         get().toast('info', `“${campaign.name}” has no downloadable video links. Open the campaign and drop the source file.`);
         get().navigate({ name: 'campaign', id: campaignId, tab: 'media' });
         return;
       }
-      const existing = get().projects.filter((p) => p.campaignId === campaignId).map((p) => p.source.url);
+      const sourceKey = (url?: string, fileId?: string) => `${url ?? ''}#${fileId ?? ''}`;
+      const existing = new Set(get().projects.filter((p) => p.campaignId === campaignId).map((p) => sourceKey(p.source.url, p.source.fileId)));
+      // Frame.io shares often hold several episodes/clips: one project per video (capped, the rest stay one click away).
+      const MAX_PER_SHARE = 4;
+      const expanded: MediaLink[] = [];
       for (const link of videoLinks) {
-        if (existing.includes(link.url)) continue;
+        if (link.kind !== 'frameio' || link.fileId) {
+          expanded.push(link);
+          continue;
+        }
+        try {
+          const share = await resolveFrameioShare(link.url);
+          const videos = share.files.filter((f) => f.kind === 'video' && f.downloadUrl).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+          if (!videos.length) {
+            get().toast('error', `No downloadable videos in the Frame.io share of “${campaign.name}”.`, 'Open the link and download manually, then drop the file in the campaign.');
+            continue;
+          }
+          const fresh = videos.filter((v) => !existing.has(sourceKey(link.url, v.id)));
+          for (const v of fresh.slice(0, MAX_PER_SHARE)) expanded.push({ url: link.url, kind: 'frameio', fileId: v.id, label: v.name, size: v.size });
+          if (fresh.length > MAX_PER_SHARE) get().toast('info', `“${campaign.name}”: clipping ${MAX_PER_SHARE} of ${videos.length} videos. Pick more in Source videos.`);
+        } catch (err) {
+          get().toast('error', `Frame.io: ${(err as Error).message}`);
+        }
+      }
+      for (const link of expanded) {
+        if (existing.has(sourceKey(link.url, link.fileId))) continue;
+        existing.add(sourceKey(link.url, link.fileId));
         try {
           const project = await get().createProjectFromLink(link, campaignId);
           void get().runPipeline(project.id);

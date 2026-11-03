@@ -1,4 +1,5 @@
 import { directDownloadUrl, googleDriveId, needsServerResolver } from '../core/vyro';
+import { pickFrameioFile, resolveFrameioShare } from '../core/frameio';
 import type { MediaLink } from '../core/types';
 import type { AppSettings } from '../shared/settings';
 import { isExtensionPage } from '../shared/env';
@@ -118,6 +119,24 @@ export async function fetchMediaToOpfs(
   onProgress({ stage: 'resolving', loaded: 0, detail: 'Resolving link…' });
   let res: Response | undefined;
   let url = directDownloadUrl(link);
+  let knownName: string | undefined;
+
+  if (link.kind === 'frameio') {
+    onProgress({ stage: 'resolving', loaded: 0, detail: 'Opening Frame.io share…' });
+    let share;
+    try {
+      share = await resolveFrameioShare(link.url, (input, init) => fetch(input, { ...init, signal }));
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') throw err;
+      throw new MediaFetchError((err as Error).message, 'Open the Frame.io link, download the video, then drop the file here.');
+    }
+    const file = pickFrameioFile(share, link.fileId);
+    if (!file?.downloadUrl) {
+      throw new MediaFetchError('No downloadable video found in this Frame.io share (downloads may be disabled).', 'Open the link, download the file manually, then drop it here.');
+    }
+    url = file.downloadUrl;
+    knownName = file.name;
+  }
 
   if (needsServerResolver(link.kind)) {
     res = await viaServerJob(link, settings, onProgress, signal);
@@ -158,7 +177,7 @@ export async function fetchMediaToOpfs(
   if (!res.body) throw new MediaFetchError('Empty response.', 'Try again.');
   const total = Number(res.headers.get('content-length')) || undefined;
   const mime = (res.headers.get('content-type') ?? 'video/mp4').split(';')[0]!.trim();
-  const name = nameFromResponse(res, url);
+  const name = knownName ?? nameFromResponse(res, url);
   const storedAs = `${opts.storedAs}.${extFromMime(mime, name || url)}`;
   const file = await writeMedia(storedAs, res.body, (loaded) => onProgress({ stage: 'downloading', loaded, total, detail: 'Downloading…' }));
   return { file, storedAs, mime, size: file.size, name };

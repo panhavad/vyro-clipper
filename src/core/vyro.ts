@@ -51,6 +51,7 @@ export function classifyMediaUrl(url: string): MediaKind {
   const host = u.hostname.replace(/^www\./, '');
   const path = u.pathname.toLowerCase();
   if (/(^|\.)youtube\.com$|^youtu\.be$/.test(host)) return 'youtube';
+  if (host === 'f.io' || /(^|\.)frame\.io$/.test(host)) return 'frameio';
   if (host === 'drive.google.com' || host === 'docs.google.com') return path.includes('/folders/') ? 'gdrive-folder' : 'gdrive';
   if (host === 'drive.usercontent.google.com') return 'gdrive';
   if (/(^|\.)dropbox(usercontent)?\.com$/.test(host)) return 'dropbox';
@@ -86,7 +87,7 @@ export function directDownloadUrl(link: Pick<MediaLink, 'url' | 'kind'>): string
 }
 
 export function isDownloadable(kind: MediaKind): boolean {
-  return kind === 'video' || kind === 'audio' || kind === 'gdrive' || kind === 'dropbox';
+  return kind === 'video' || kind === 'audio' || kind === 'gdrive' || kind === 'dropbox' || kind === 'frameio';
 }
 
 export function needsServerResolver(kind: MediaKind): boolean {
@@ -118,11 +119,17 @@ function disclosureModeOf(req: unknown): string | undefined {
   const ftc = get(req, 'platformRules.ftcDisclosure');
   if (!ftc) return arr(get(req, 'text.ftcDisclosureHashtags')).length ? 'hashtag' : undefined;
   if (typeof ftc === 'string') return ftc;
-  const values = Object.values(obj(ftc) ?? {}).map((v) => (typeof v === 'string' ? v : str(obj(v)?.method) ?? str(obj(v)?.type) ?? ''));
-  if (values.some((v) => /flex/i.test(v))) return 'flexible';
+  // Vyro: { tiktok: { mode: 'either' }, instagram: { mode: 'either' } } — either = hashtag OR paid-partnership label.
+  const values = Object.values(obj(ftc) ?? {}).map((v) => (typeof v === 'string' ? v : str(obj(v)?.mode) ?? str(obj(v)?.method) ?? str(obj(v)?.type) ?? ''));
+  if (values.some((v) => /flex|either|any/i.test(v))) return 'flexible';
   if (values.some((v) => /hashtag/i.test(v))) return 'hashtag';
   if (values.length) return 'platform';
   return undefined;
+}
+
+/** Brands sometimes write an instruction in the caption field ("Tag @brand in TikTok posts"). */
+export function isCaptionInstruction(caption: string): boolean {
+  return /^(please\s+)?(tag|mention|include|use|add|put|write|link|credit|follow|say)\b/i.test(caption.trim());
 }
 
 /** True when an object looks like a Vyro campaign from the catalog/campaign APIs. */
@@ -174,11 +181,23 @@ export function normalizeVyroCampaign(raw: unknown, now = Date.now()): Campaign 
   const captionHashtags = arr(get(req, 'text.hashtags')).map((h) => normalizeHashtag(String(h))).filter(Boolean);
   const disclosure = arr(get(req, 'text.ftcDisclosureHashtags')).map((h) => normalizeHashtag(String(h))).filter(Boolean);
   const socialAccount = obj(req.socialAccount);
+  // Vyro's standard reminders: [{ group: 'do' | 'avoid', rule: '…' }]
+  const reminders = arr(o.reminders)
+    .map((r) => ({ group: str(obj(r)?.group) ?? '', rule: str(obj(r)?.rule) ?? '' }))
+    .filter((r) => r.rule);
+  let caption = str(get(req, 'text.caption'));
+  const mentions = [...insights.mentions];
+  const dos = [...reminders.filter((r) => r.group !== 'avoid').map((r) => r.rule), ...insights.dos];
+  if (caption && isCaptionInstruction(caption)) {
+    dos.unshift(caption);
+    mentions.push(...(caption.match(/@[A-Za-z0-9_.]{2,30}/g) ?? []).map((m) => m.replace(/\.+$/, '')));
+    caption = undefined;
+  }
   const rules: CampaignRules = {
     ...defaultRules(),
     minDurationSec: minLength,
     maxDurationSec: insights.maxDuration,
-    caption: str(get(req, 'text.caption')),
+    caption,
     hashtags: uniq(captionHashtags).slice(0, 5),
     disclosureHashtags: uniq(disclosure),
     disclosureMode: disclosureModeOf(req),
@@ -191,10 +210,10 @@ export function normalizeVyroCampaign(raw: unknown, now = Date.now()): Campaign 
     allowCollab: get(req, 'collaboration.allowCollabAndTagging') !== false,
     languages: languages.length ? languages : ['en'],
     platforms: platforms.length ? platforms : ['tiktok', 'instagram', 'youtube', 'x'],
-    briefDos: insights.dos,
-    briefDonts: insights.donts,
+    briefDos: uniq(dos),
+    briefDonts: uniq([...reminders.filter((r) => r.group === 'avoid').map((r) => r.rule), ...insights.donts]),
     keywords: insights.keywords,
-    mentions: insights.mentions,
+    mentions: uniq(mentions),
     socialAccount: socialAccount
       ? {
           displayName: str(socialAccount.displayName),
@@ -206,6 +225,9 @@ export function normalizeVyroCampaign(raw: unknown, now = Date.now()): Campaign 
   if (rules.minDurationSec === undefined && insights.minDuration !== undefined) rules.minDurationSec = insights.minDuration;
   const brand =
     str(get(o, 'displayOption.workspaceName')) ?? str(get(o, 'workspace.name')) ?? str(get(o, 'brand.name')) ?? str(get(o, 'client.name')) ?? str(o.brandName);
+  const formats = arr(get(req, 'formats'))
+    .map((f) => (typeof f === 'string' ? f : str(obj(f)?.type)))
+    .filter((f): f is string => !!f);
   return {
     id,
     source: 'vyro',
@@ -215,14 +237,19 @@ export function normalizeVyroCampaign(raw: unknown, now = Date.now()): Campaign 
     brandImage: str(get(o, 'displayOption.workspaceImage')) ?? str(get(o, 'workspace.image')) ?? str(get(o, 'workspace.logo')) ?? str(get(o, 'workspace.avatar')),
     image: str(o.image) ?? str(o.thumbnail) ?? str(o.thumbnailUrl) ?? str(o.coverImage) ?? str(o.campaignImage) ?? str(get(o, 'image.url')),
     type: str(o.type),
-    status: str(o.status),
+    status: str(o.status) ?? str(get(o, 'status.id')),
     url: slug ? `${VYRO_APP}/campaigns?c=${encodeURIComponent(slug)}` : undefined,
     submitUrl: `${VYRO_APP}/campaigns/add-clips/${encodeURIComponent(id)}`,
     cpm: model && !/cpm/i.test(model) && o.headlineRate === undefined ? undefined : cpm,
+    cpmIsRange: o.headlineRateIsRange === true,
     payoutModel: model,
     budgetTotal: budgetValue,
     budgetSpent,
     budgetRemaining,
+    minViewsPerClip: num(get(req, 'minViewsPerClip')) ?? num(o.minViewsPerClip),
+    locked: o.isLocked === true,
+    enrolled: o.enrolled === true,
+    formats: formats.length ? formats : undefined,
     startDate: str(o.startDate) ?? str(o.targetStartDate),
     endDate: str(o.endDate),
     briefHtml: briefHtml || undefined,
