@@ -12,10 +12,11 @@ function thumbKey(clip: Clip): string {
   return `${clip.id}:${clip.start.toFixed(2)}:${clip.end.toFixed(2)}:${e.captionStyle}:${e.layout}:${e.aspect}:${clip.hook}:${clip.reframe?.analyzedAt ?? 0}:${e.captionColor ?? ''}:${e.highlightColor ?? ''}`;
 }
 
-export function useClipThumbnail(project: Project, clip: Clip, campaign?: Campaign): string | undefined {
+/** Clip thumbnail URL; `null` when it can't be rendered (e.g. the source video is unavailable). */
+export function useClipThumbnail(project: Project, clip: Clip, campaign?: Campaign): string | null | undefined {
   const settings = useStudio((s) => s.settings);
   const key = thumbKey(clip);
-  const [url, setUrl] = useState<string | undefined>(() => thumbCache.get(key));
+  const [url, setUrl] = useState<string | null | undefined>(() => thumbCache.get(key));
   useEffect(() => {
     if (thumbCache.has(key)) {
       setUrl(thumbCache.get(key));
@@ -31,12 +32,15 @@ export function useClipThumbnail(project: Project, clip: Clip, campaign?: Campai
         thumbCache.set(key, u);
         if (alive) setUrl(u);
       })
-      .catch((err) => console.warn('thumbnail failed', err));
+      .catch((err) => {
+        console.warn('thumbnail failed', err);
+        if (alive) setUrl(null);
+      });
     return () => {
       alive = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, settings, project.meta, project.source.storedAs]);
+  }, [key, settings, project.meta, project.source.storedAs, project.source.restoredAt]);
   return url;
 }
 

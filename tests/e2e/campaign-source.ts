@@ -6,7 +6,8 @@
 // Usage: E2E_CAMPAIGN_JSON=catalog.json E2E_CAMPAIGN="Joy 101" STUDIO_URL=http://127.0.0.1:8090 node tests/e2e/campaign-source.ts
 // Optional: E2E_EXPECT_BURNED_IN=1|0 asserts whether the clipped source already has burned-in captions;
 // E2E_FILE="Harry Connick" clips a specific file instead of the smallest one.
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { ALL_FORMATS, BufferSource, Input } from 'mediabunny';
 import { chromium, type Download } from 'playwright-core';
@@ -32,8 +33,12 @@ async function main() {
   assert(CHROME, 'Chrome not found');
   mkdirSync(ART, { recursive: true });
   const payload = readFileSync(JSON_PATH, 'utf8');
-  const browser = await chromium.launch({ executablePath: CHROME, headless: !process.env.HEADED, args: ['--enable-unsafe-webgpu'] });
-  const context = await browser.newContext({ acceptDownloads: true, viewport: { width: 1500, height: 1100 } });
+  // E2E_PERSISTENT=1 uses a normal on-disk profile (incognito-like contexts cap site storage at ~1 GB).
+  const profileDir = process.env.E2E_PERSISTENT ? mkdtempSync(join(tmpdir(), 'vc-e2e-')) : undefined;
+  const browser = profileDir ? undefined : await chromium.launch({ executablePath: CHROME, headless: !process.env.HEADED, args: ['--enable-unsafe-webgpu'] });
+  const context = profileDir
+    ? await chromium.launchPersistentContext(profileDir, { executablePath: CHROME, headless: !process.env.HEADED, args: ['--enable-unsafe-webgpu'], acceptDownloads: true, viewport: { width: 1500, height: 1100 } })
+    : await browser!.newContext({ acceptDownloads: true, viewport: { width: 1500, height: 1100 } });
   const page = await context.newPage();
   const errors: string[] = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -105,11 +110,23 @@ async function main() {
       assert(burnedIn.captions === expected, `burned-in captions detected = ${expected}`);
       assert(burnedIn.ourCaptions.every((on) => on === !expected), 'animated captions follow the source (off over burned-in captions)');
     }
+    if (process.env.E2E_EVICT) {
+      // Simulate the browser evicting the stored source: export must download it again by itself.
+      const removed = await page.evaluate(async () => {
+        type S = { projects: Array<{ source: { storedAs?: string } }> };
+        const name = (window as unknown as { __vyroclipper: { getState: () => S } }).__vyroclipper.getState().projects[0]!.source.storedAs!;
+        const dir = await (await navigator.storage.getDirectory()).getDirectoryHandle('media');
+        await dir.removeEntry(name);
+        return name;
+      });
+      log('evicted source from browser storage:', removed);
+    }
 
     await page.locator('.clip-card').first().getByRole('button', { name: 'Edit' }).click();
     await page.locator('.player-stage canvas').waitFor();
     await page.waitForTimeout(3000);
     await page.screenshot({ path: join(ART, 'live-02-editor.png') });
+    if (process.env.E2E_EVICT) log('player overlay:', (await page.locator('.player-loading').textContent({ timeout: 1000 }).catch(() => null))?.replace(/\s+/g, ' '));
     await page.getByRole('button', { name: /^Checks/ }).click();
     log('checks:', (await page.locator('.checks li').allInnerTexts()).map((t) => t.replace(/\s+/g, ' ')));
     const downloads: Download[] = [];
@@ -136,7 +153,9 @@ async function main() {
     await page.screenshot({ path: join(ART, 'live-failure.png'), fullPage: true }).catch(() => undefined);
     process.exitCode = 1;
   } finally {
-    await browser.close();
+    await context.close();
+    await browser?.close();
+    if (profileDir) rmSync(profileDir, { recursive: true, force: true });
   }
 }
 

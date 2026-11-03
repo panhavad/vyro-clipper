@@ -85,7 +85,7 @@ export function ClipCard({ project, clip, index, campaign, selected, onSelect }:
   return (
     <div className={cx('card clip-card', selected && 'selected')}>
       <div className="clip-thumb" onClick={() => navigate({ name: 'clip', projectId: project.id, clipId: clip.id })}>
-        {thumb ? <img src={thumb} alt={clip.title} /> : <div className="thumb-placeholder">Rendering preview…</div>}
+        {thumb ? <img src={thumb} alt={clip.title} /> : <div className="thumb-placeholder">{thumb === null ? 'Preview unavailable' : 'Rendering preview…'}</div>}
         <div className="clip-rank">#{index + 1}</div>
         <div className="clip-dur">{formatTime(durationSec)}</div>
         <div className="clip-score">

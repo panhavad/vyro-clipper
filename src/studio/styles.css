@@ -1048,6 +1048,8 @@ pre.brief {
   inset: 0;
   display: grid;
   place-items: center;
+  padding: 16px;
+  text-align: center;
   color: var(--muted);
 }
 .player-controls {

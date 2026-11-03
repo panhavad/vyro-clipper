@@ -54,12 +54,12 @@ export async function writeMedia(name: string, data: Blob | ReadableStream<Uint8
   const dir = await mediaDir();
   const handle = await dir.getFileHandle(name, { create: true });
   const writable = await handle.createWritable();
+  const reader = data instanceof Blob ? undefined : data.getReader();
   try {
-    if (data instanceof Blob) {
-      await writable.write(data);
-      onBytes?.(data.size);
+    if (!reader) {
+      await writable.write(data as Blob);
+      onBytes?.((data as Blob).size);
     } else {
-      const reader = data.getReader();
       let total = 0;
       for (;;) {
         const { done, value } = await reader.read();
@@ -71,6 +71,8 @@ export async function writeMedia(name: string, data: Blob | ReadableStream<Uint8
     }
     await writable.close();
   } catch (err) {
+    // Stop the network transfer too, not just the write.
+    await reader?.cancel().catch(() => undefined);
     await writable.abort().catch(() => undefined);
     throw err;
   }
@@ -81,8 +83,10 @@ export async function readMedia(name: string): Promise<File | undefined> {
   try {
     const dir = await mediaDir();
     return await (await dir.getFileHandle(name)).getFile();
-  } catch {
-    return undefined;
+  } catch (err) {
+    const e = err as DOMException;
+    if (e?.name === 'NotFoundError') return undefined;
+    throw new Error(`Can't read the source video from browser storage (${e?.name ?? 'Error'}: ${e?.message ?? String(err)}).`);
   }
 }
 

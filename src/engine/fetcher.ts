@@ -153,7 +153,7 @@ async function fetchFrameio(link: MediaLink, opts: { settings: AppSettings; stor
     throw new MediaFetchError('No downloadable video found in this Frame.io share (downloads may be disabled).', 'Open the link, download the file manually, then drop it here.');
   }
   const init: RequestInit = { signal, credentials: 'omit', redirect: 'follow' };
-  for (let i = 0; i < ladder.length; i++) {
+  for (let i = 0; i < ladder.length; ) {
     const pick = ladder[i]!;
     const res =
       (await tryFetch(pick.url, init)) ??
@@ -161,13 +161,23 @@ async function fetchFrameio(link: MediaLink, opts: { settings: AppSettings; stor
     if (!res) throw new MediaFetchError('Frame.io refused the download (the link may have expired).', 'Reopen the campaign and try again, or download the file manually and drop it here.');
     const name = pick.label === 'original' ? file.name : `${file.name.replace(/\.[a-z0-9]{2,4}$/i, '')}.mp4`;
     const note = pick.label === 'original' ? undefined : `Frame.io ${pick.label}${i > 0 ? ' (browser storage was full)' : ''}`;
+    let written = 0;
     try {
-      return await saveResponse(res, pick.url, name, { storedAs: opts.storedAs, onProgress: (p) => onProgress(note ? { ...p, detail: note } : p) });
+      return await saveResponse(res, pick.url, name, {
+        storedAs: opts.storedAs,
+        onProgress: (p) => {
+          written = p.loaded;
+          onProgress(note ? { ...p, detail: note } : p);
+        },
+      });
     } catch (err) {
       if (!isQuotaError(err)) throw err;
-      const next = ladder[i + 1];
-      if (!next) throw storageError(pick.size);
-      onProgress({ stage: 'resolving', loaded: 0, detail: `Not enough browser storage for the ${pick.label} — using the ${next.label} instead` });
+      // What got written before storage ran out is roughly what fits: skip copies that are not smaller than that.
+      const budget = written * 0.95;
+      const nextIndex = ladder.findIndex((r, j) => j > i && (r.size === undefined || r.size < budget));
+      if (nextIndex < 0) throw storageError(pick.size);
+      onProgress({ stage: 'resolving', loaded: 0, detail: `Not enough browser storage for the ${pick.label} — using the ${ladder[nextIndex]!.label} instead` });
+      i = nextIndex;
     }
   }
   throw storageError();

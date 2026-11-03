@@ -312,6 +312,8 @@ export interface Project {
     mime?: string;
     /** File name inside the origin-private file system */
     storedAs?: string;
+    /** Set when the source was downloaded again after the browser lost it */
+    restoredAt?: number;
   };
   meta?: SourceMeta;
   /** Text already burned into the source (captions, titles, logos) */

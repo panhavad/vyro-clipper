@@ -1,4 +1,4 @@
-import { makeHookOverlay, makeTitle, topicalHashtags } from './hooks';
+import { makeHookOverlay, makeTitle, titleKey, topicalHashtags } from './hooks';
 import { buildSentenceFeatures, calibrateTotal, scoreWindow, type Candidate, type DetectOptions } from './virality';
 import { planClip } from './timeline';
 import { shortId, truncateWords, cleanSpokenText } from './text';
@@ -62,6 +62,26 @@ export function candidateToClip(c: Candidate, ctx: ClipFactoryContext, extra?: P
     createdAt: now,
     updatedAt: now,
   };
+}
+
+/** Two clips can share their punchiest line: keep titles and hooks unique (the higher-scoring clip keeps its own). */
+export function uniqueTitles(clips: Clip[]): Clip[] {
+  const titles = new Set<string>();
+  const hooks = new Set<string>();
+  const renamed = new Map<string, Clip>();
+  for (const c of [...clips].sort((a, b) => b.scores.total - a.scores.total)) {
+    let next = c;
+    if (titles.has(titleKey(c.title))) {
+      const title = makeTitle(c.transcript, 60, titles);
+      const autoCaption = c.caption === truncateWords(cleanSpokenText(c.title), 120);
+      next = { ...next, title, caption: autoCaption ? truncateWords(cleanSpokenText(title), 120) : c.caption };
+    }
+    if (c.hook && hooks.has(titleKey(c.hook))) next = { ...next, hook: makeHookOverlay(makeTitle(c.transcript, 52, hooks), 54) };
+    titles.add(titleKey(next.title));
+    if (next.hook) hooks.add(titleKey(next.hook));
+    if (next !== c) renamed.set(c.id, next);
+  }
+  return renamed.size ? clips.map((c) => renamed.get(c.id) ?? c) : clips;
 }
 
 /** Merges LLM suggestions with heuristic scoring (60% model / 40% signal-based) for stable virality scores. */

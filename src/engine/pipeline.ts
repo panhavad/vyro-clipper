@@ -1,4 +1,4 @@
-import { candidateToClip, llmSuggestionsToClips, type ClipFactoryContext } from '../core/clipFactory';
+import { candidateToClip, llmSuggestionsToClips, uniqueTitles, type ClipFactoryContext } from '../core/clipFactory';
 import { editSettingsForCampaign } from '../core/defaults';
 import { buildClipPrompts, parseClipSuggestions, type LlmClipSuggestion } from '../core/llm';
 import { buildSentences } from '../core/transcript';
@@ -94,7 +94,7 @@ export async function detectClips(project: Project & { meta: SourceMeta; transcr
         suggestions.push(...parseClipSuggestions(text, sentences, { first: p.firstSentence, last: p.lastSentence }));
       }
       const clips = llmSuggestionsToClips(suggestions, ctx, project.envelope, detect);
-      if (clips.length) return clips;
+      if (clips.length) return uniqueTitles(clips);
     } catch (err) {
       if ((err as Error).name === 'AbortError') throw err;
       console.warn('LLM clip detection failed, using built-in engine', err);
@@ -104,7 +104,7 @@ export async function detectClips(project: Project & { meta: SourceMeta; transcr
   if (words.length >= 20) candidates = detectViralMoments(words, sentences, project.envelope, detect);
   else if (project.envelope?.rms.length) candidates = detectByEnergy(project.envelope, project.meta.duration, detect);
   else candidates = evenlySpaced(project.meta.duration, detect);
-  return candidates.map((c) => candidateToClip(c, ctx));
+  return uniqueTitles(candidates.map((c) => candidateToClip(c, ctx)));
 }
 
 /** Full pipeline: probe → transcribe → detect viral moments → face-track reframing. Resumable. */

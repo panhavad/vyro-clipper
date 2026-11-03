@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { makeHookOverlay, makeTitle, topicalHashtags } from '../../src/core/hooks';
+import { makeHookOverlay, makeTitle, titleKey, topicalHashtags } from '../../src/core/hooks';
+import { uniqueTitles } from '../../src/core/clipFactory';
+import type { Clip } from '../../src/core/types';
 
 describe('titles & hooks', () => {
   it('prefers complete sentences over cut-off comma fragments', () => {
@@ -22,9 +24,36 @@ describe('titles & hooks', () => {
     expect(makeTitle(text, 40)).toBe('Everybody is Excited About This');
   });
 
+  it('prefers a specific line over a generic question', () => {
+    const t = makeTitle('What was it? I spent three years building rockets in my garage.');
+    expect(t).not.toBe('What Was It?');
+    expect(t).toContain('Rockets');
+  });
+
+  it('skips titles already used by other clips', () => {
+    const text = "Why'd you pick that date? Because my grandmother was born on that exact day in Louisiana.";
+    const first = makeTitle(text);
+    const second = makeTitle(text, 60, new Set([titleKey(first)]));
+    expect(second).not.toBe(first);
+    expect(titleKey("Why'd You Pick That Date?")).toBe("why'd you pick that date");
+  });
+
   it('derives topical hashtags from keywords and repeated words', () => {
     const tags = topicalHashtags('rockets rockets rockets are cool and the moon is far', ['Artemis', 'Moon base']);
     expect(tags[0]).toBe('#Artemis');
     expect(tags).toContain('#Moonbase');
+  });
+
+  it('keeps titles and hooks unique across a batch of clips (best clip keeps its own)', () => {
+    const transcript = "Why'd you pick that date? Because my grandmother was born on that exact day in Louisiana.";
+    const clip = (id: string, total: number): Clip => {
+      const title = makeTitle(transcript);
+      return { id, title, hook: makeHookOverlay(makeTitle(transcript, 52), 54), caption: title, transcript, scores: { total } } as unknown as Clip;
+    };
+    const [a, b] = uniqueTitles([clip('a', 70), clip('b', 81)]);
+    expect(b!.title).toBe(makeTitle(transcript));
+    expect(a!.title).not.toBe(b!.title);
+    expect(titleKey(a!.hook)).not.toBe(titleKey(b!.hook));
+    expect(a!.caption).toBe(a!.title);
   });
 });

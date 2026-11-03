@@ -44,9 +44,23 @@ function titleCandidates(text: string): TitleCandidate[] {
   return out;
 }
 
-/** Picks the punchiest line of a clip as its title (Opus-style "AI hook"). */
-export function makeTitle(clipText: string, maxChars = 60): string {
-  const options = titleCandidates(clipText);
+/** Normalised form used to compare titles ("Why'd You Pick That Date?" ≈ "why'd you pick that date"). */
+export const titleKey = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}' ]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+/**
+ * Picks the punchiest line of a clip as its title (Opus-style "AI hook").
+ * `exclude` holds titleKey()s already used by other clips, so a batch never repeats a title.
+ */
+export function makeTitle(clipText: string, maxChars = 60, exclude?: ReadonlySet<string>): string {
+  const all = titleCandidates(clipText);
+  // Lines without substance ("What was it?", "How old are you?") only qualify when nothing better exists.
+  const specific = all.filter((c) => contentWords(c.text).length >= 2);
+  const options = specific.length ? specific : all;
   if (!options.length) return truncateWords(titleCase(cleanSpokenText(clipText) || 'Watch this'), maxChars);
   const ranked = options
     .map((c) => {
@@ -59,11 +73,13 @@ export function makeTitle(clipText: string, maxChars = 60): string {
       else if (c.weak) s -= 12; // reads as cut off
       else if (words < 4) s -= 4;
       if (words >= 4 && words <= 12) s += 5;
+      s += Math.min(6, contentWords(c.text).length * 1.5);
       return { c, s };
     })
     .sort((a, b) => b.s - a.s);
-  const t = ranked[0]!.c.text.replace(/[.!]+$/, '');
-  return truncateWords(titleCase(t), maxChars);
+  const finalise = (text: string) => truncateWords(titleCase(text.replace(/[.!]+$/, '')), maxChars);
+  const fresh = exclude?.size ? ranked.find((r) => !exclude.has(titleKey(finalise(r.c.text)))) : undefined;
+  return finalise((fresh ?? ranked[0]!).c.text);
 }
 
 const EMOJI_BY_MOOD: Array<[RegExp, string]> = [

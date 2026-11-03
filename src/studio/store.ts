@@ -2,12 +2,12 @@ import { create } from 'zustand';
 import { generateSettingsForCampaign } from '../core/defaults';
 import { shortId } from '../core/text';
 import type { Campaign, Clip, EditSettings, MediaLink, Project } from '../core/types';
-import { manualCampaign, mergeCampaign } from '../core/vyro';
+import { manualCampaign, mergeCampaign, classifyMediaUrl } from '../core/vyro';
 import { chooseRendition, isLongForm, rankForClipping } from '../core/frameio';
 import { resolveShare } from '../engine/frameioClient';
 import { fetchMediaToOpfs, MediaFetchError } from '../engine/fetcher';
 import { clipBaseName, downloadFiles, exportClipPackage, saveToDirectory, zipFiles, type ExportedFile } from '../engine/exportService';
-import { detectClips, processProject, rulesFor } from '../engine/pipeline';
+import { detectClips, getProjectFile, processProject, rulesFor } from '../engine/pipeline';
 import { db, deleteMedia, requestPersistentStorage, writeMedia } from '../engine/storage';
 import type { AppSettings } from '../shared/settings';
 
@@ -59,6 +59,11 @@ interface StudioState {
   updateProject(id: string, patch: Partial<Project>, persist?: boolean): Promise<void>;
   deleteProject(id: string): Promise<void>;
   runPipeline(projectId: string, opts?: { redetect?: boolean }): Promise<void>;
+  /**
+   * Makes sure the project's source video is readable; link-based projects are re-downloaded when the browser
+   * lost the file (storage eviction, cleared site data). Throws when it can't be restored.
+   */
+  ensureSource(projectId: string, signal?: AbortSignal): Promise<void>;
   regenerateClips(projectId: string): Promise<void>;
   updateClip(projectId: string, clipId: string, patch: Partial<Clip>): void;
   updateClipEdit(projectId: string, clipId: string, patch: Partial<EditSettings>): void;
@@ -259,6 +264,29 @@ export const useStudio = create<StudioState>((set, get) => {
       if (p?.source.storedAs) await deleteMedia(p.source.storedAs);
     },
 
+    async ensureSource(projectId, signal) {
+      const p = get().projects.find((x) => x.id === projectId);
+      if (!p) return;
+      try {
+        await getProjectFile(p);
+        return;
+      } catch (err) {
+        if (p.source.kind !== 'url' || !p.source.url) throw err;
+      }
+      get().toast('info', `The source video of “${p.name}” is no longer in browser storage — downloading it again.`);
+      const link: MediaLink = { url: p.source.url, kind: classifyMediaUrl(p.source.url), ...(p.source.fileId ? { fileId: p.source.fileId } : {}) };
+      const before = p.progress;
+      const fetched = await fetchMediaToOpfs(link, {
+        settings: get().settings!,
+        storedAs: p.id,
+        signal,
+        onProgress: (q) =>
+          void get().updateProject(projectId, { progress: { step: 'Re-downloading source video', pct: q.total ? (q.loaded / q.total) * 100 : 0, detail: q.stage === 'downloading' ? `${(q.loaded / 1e6).toFixed(1)} MB${q.total ? ` / ${(q.total / 1e6).toFixed(1)} MB` : ''}` : q.detail } }, false),
+      });
+      const current = get().projects.find((x) => x.id === projectId) ?? p;
+      await get().updateProject(projectId, { progress: before, source: { ...current.source, storedAs: fetched.storedAs, size: fetched.size, mime: fetched.mime, restoredAt: Date.now() } });
+    },
+
     async runPipeline(projectId, opts) {
       const project = get().projects.find((p) => p.id === projectId);
       if (!project || get().jobs[projectId]) return;
@@ -267,6 +295,7 @@ export const useStudio = create<StudioState>((set, get) => {
       await get().updateProject(projectId, { status: 'probing', error: undefined, progress: { step: 'Queued', pct: 0 } });
       try {
         await enqueue(async () => {
+          await get().ensureSource(projectId, controller.signal);
           const fresh = get().projects.find((p) => p.id === projectId);
           if (!fresh) return;
           await processProject(fresh, {
@@ -346,6 +375,12 @@ export const useStudio = create<StudioState>((set, get) => {
       }
       const campaign = get().campaigns.find((c) => c.id === project.campaignId);
       const folderName = campaign?.name ?? project.name;
+      try {
+        await get().ensureSource(projectId);
+      } catch (err) {
+        get().toast('error', `Export failed: ${(err as Error).message}`);
+        return;
+      }
       const zipped: ExportedFile[] = [];
       let ok = 0;
       for (const clipId of clipIds) {

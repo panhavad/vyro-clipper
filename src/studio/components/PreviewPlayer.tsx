@@ -16,24 +16,28 @@ export interface PlayerHandle {
 
 const srcUrls = new Map<string, { url: string; refs: number }>();
 
-function useSourceUrl(project: Project): string | undefined {
+function useSourceUrl(project: Project): { url?: string; error?: string } {
   const [url, setUrl] = useState<string>();
+  const [error, setError] = useState<string>();
   useEffect(() => {
-    const key = project.source.storedAs;
-    if (!key) return;
+    if (!project.source.storedAs) return;
+    const key = `${project.source.storedAs}#${project.source.restoredAt ?? 0}`;
     let alive = true;
+    setError(undefined);
     const cached = srcUrls.get(key);
     if (cached) {
       cached.refs++;
       setUrl(cached.url);
     } else {
-      void getProjectFile(project).then((f) => {
-        if (!alive) return;
-        const entry = srcUrls.get(key) ?? { url: URL.createObjectURL(f), refs: 0 };
-        entry.refs++;
-        srcUrls.set(key, entry);
-        setUrl(entry.url);
-      });
+      void getProjectFile(project)
+        .then((f) => {
+          if (!alive) return;
+          const entry = srcUrls.get(key) ?? { url: URL.createObjectURL(f), refs: 0 };
+          entry.refs++;
+          srcUrls.set(key, entry);
+          setUrl(entry.url);
+        })
+        .catch((err: Error) => alive && setError(err.message));
     }
     return () => {
       alive = false;
@@ -44,12 +48,15 @@ function useSourceUrl(project: Project): string | undefined {
       }
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [project.source.storedAs]);
-  return url;
+  }, [project.source.storedAs, project.source.restoredAt]);
+  return { url, error };
 }
 
 export const PreviewPlayer = forwardRef<PlayerHandle, { project: Project; clip: Clip; campaign?: Campaign; onSrcTime?: (t: number) => void }>(function PreviewPlayer({ project, clip, campaign, onSrcTime }, ref) {
   const settings = useStudio((s) => s.settings)!;
+  const ensureSource = useStudio((s) => s.ensureSource);
+  const toast = useStudio((s) => s.toast);
+  const restoring = useStudio((s) => /^Re-downloading/.test(s.projects.find((p) => p.id === project.id)?.progress?.step ?? ''));
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cacheRef = useRef<DrawCache>({});
@@ -180,11 +187,26 @@ export const PreviewPlayer = forwardRef<PlayerHandle, { project: Project; clip: 
     <div className="player">
       <div className="player-stage" style={{ aspectRatio: `${rp.width} / ${rp.height}` }}>
         <canvas ref={canvasRef} width={rp.width} height={rp.height} onClick={() => (playing ? (videoRef.current?.pause(), setPlaying(false)) : play())} />
-        {!src && <div className="player-loading">Loading video…</div>}
+        {!src.url && (
+          <div className="player-loading">
+            {src.error ? (
+              <span>
+                ⚠ {src.error}
+                {project.source.kind === 'url' && (
+                  <button className="btn btn-sm btn-primary" style={{ display: 'block', margin: '10px auto 0' }} disabled={restoring} onClick={() => void ensureSource(project.id).catch((err: Error) => toast('error', err.message))}>
+                    {restoring ? 'Downloading…' : '↻ Download it again'}
+                  </button>
+                )}
+              </span>
+            ) : (
+              'Loading video…'
+            )}
+          </div>
+        )}
       </div>
       <video
         ref={videoRef}
-        src={src}
+        src={src.url}
         muted={muted}
         playsInline
         preload="auto"
