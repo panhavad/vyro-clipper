@@ -162,7 +162,7 @@ async function update(reason: string): Promise<void> {
       cpSync(join(APP_DIR, 'node_modules'), nodeModules, { recursive: true });
       needInstall = false;
     }
-    if (needInstall) await run(npm, ['ci', '--no-audit', '--no-fund', '--include=dev'], { cwd: WORK_DIR });
+    if (needInstall) await run(npm, ['ci', '--no-audit', '--no-fund', '--include=dev', '--ignore-scripts'], { cwd: WORK_DIR });
     const started = Date.now();
     await run(npm, ['run', 'build'], { cwd: WORK_DIR, env: { GIT_COMMIT: head, GIT_BRANCH: BRANCH, GIT_MESSAGE: message } });
     const dir = join(RELEASES, head);

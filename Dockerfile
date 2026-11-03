@@ -6,7 +6,8 @@ ARG NODE_VERSION=24
 FROM node:${NODE_VERSION}-bookworm-slim AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci --no-audit --no-fund --include=dev
+# --ignore-scripts: skips onnxruntime-node/sharp native downloads (Transformers.js runs in the browser here).
+RUN npm ci --no-audit --no-fund --include=dev --ignore-scripts
 
 # ---- build the web studio + Chrome extension ----
 FROM deps AS build
