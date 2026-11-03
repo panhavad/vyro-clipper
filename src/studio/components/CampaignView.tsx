@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { parseBrief } from '../../core/brief';
-import { resolveFrameioShare, type FrameioShare } from '../../core/frameio';
+import { type FrameioShare } from '../../core/frameio';
+import { resolveShare } from '../../engine/frameioClient';
 import type { Campaign, CampaignRules, MediaLink, Platform } from '../../core/types';
 import { PLATFORMS } from '../../core/types';
 import { classifyMediaUrl, effectiveRules, isDownloadable, needsServerResolver } from '../../core/vyro';
@@ -95,20 +96,24 @@ function RulesEditor({ campaign }: { campaign: Campaign }) {
 }
 
 function FrameioBrowser({ link, campaign, used, onClip }: { link: MediaLink; campaign: Campaign; used: Set<string>; onClip: (l: MediaLink) => void }) {
+  const settings = useStudio((s) => s.settings);
   const [state, setState] = useState<{ loading: boolean; error?: string; share?: FrameioShare }>({ loading: false });
   const load = async () => {
     setState({ loading: true });
     try {
-      setState({ loading: false, share: await resolveFrameioShare(link.url) });
+      setState({ loading: false, share: await resolveShare(link.url, settings) });
     } catch (err) {
       setState({ loading: false, error: (err as Error).message });
     }
   };
   if (!state.share) {
     return (
-      <Button size="sm" kind="primary" onClick={() => void load()} disabled={state.loading} title={state.error}>
-        {state.loading ? 'Opening…' : state.error ? 'Retry' : '📂 Browse files'}
-      </Button>
+      <div className="row gap center-v">
+        <Button size="sm" kind="primary" onClick={() => void load()} disabled={state.loading}>
+          {state.loading ? 'Opening…' : state.error ? 'Retry' : '📂 Browse files'}
+        </Button>
+        {state.error && <span className="small bad">{state.error}</span>}
+      </div>
     );
   }
   const files = state.share.files.filter((f) => f.kind === 'video' || f.kind === 'audio');

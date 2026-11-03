@@ -7,7 +7,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { zipSync } from 'fflate';
-import { proxyMedia } from './proxy.ts';
+import { proxyMedia, resolveRedirects } from './proxy.ts';
 import { HttpError, envBool, envInt, log } from './util.ts';
 import { MediaJobs } from './ytdlp.ts';
 
@@ -204,6 +204,12 @@ async function handleApi(req: IncomingMessage, res: ServerResponse, url: URL) {
     const target = url.searchParams.get('url');
     if (!target) throw new HttpError(400, 'url parameter required');
     return proxyMedia(req, res, target, ALLOW_PRIVATE);
+  }
+  if (path === '/api/resolve' && req.method === 'GET') {
+    // Follows redirects (e.g. f.io short links) that browsers can't inspect cross-origin.
+    const target = url.searchParams.get('url');
+    if (!target) throw new HttpError(400, 'url parameter required');
+    return json(res, 200, { url: await resolveRedirects(target, ALLOW_PRIVATE) });
   }
   if (path === '/api/media/jobs' && req.method === 'POST') {
     const body = JSON.parse((await readBody(req)).toString() || '{}') as { url?: string };

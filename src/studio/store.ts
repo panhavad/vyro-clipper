@@ -3,7 +3,7 @@ import { generateSettingsForCampaign } from '../core/defaults';
 import { shortId } from '../core/text';
 import type { Campaign, Clip, EditSettings, MediaLink, Project } from '../core/types';
 import { manualCampaign, mergeCampaign } from '../core/vyro';
-import { resolveFrameioShare } from '../core/frameio';
+import { resolveShare } from '../engine/frameioClient';
 import { fetchMediaToOpfs, MediaFetchError } from '../engine/fetcher';
 import { clipBaseName, downloadFiles, exportClipPackage, saveToDirectory, zipFiles, type ExportedFile } from '../engine/exportService';
 import { detectClips, processProject, rulesFor } from '../engine/pipeline';
@@ -394,7 +394,7 @@ export const useStudio = create<StudioState>((set, get) => {
           continue;
         }
         try {
-          const share = await resolveFrameioShare(link.url);
+          const share = await resolveShare(link.url, get().settings);
           const videos = share.files.filter((f) => f.kind === 'video' && f.downloadUrl).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
           if (!videos.length) {
             get().toast('error', `No downloadable videos in the Frame.io share of “${campaign.name}”.`, 'Open the link and download manually, then drop the file in the campaign.');

@@ -6,6 +6,19 @@ import { HttpError, assertPublicUrl } from './util.ts';
 const PASS_HEADERS = ['content-type', 'content-length', 'content-range', 'accept-ranges', 'content-disposition', 'last-modified', 'etag'];
 const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36 VyroClipper';
 
+/** Returns the final URL after following redirects (each hop re-validated against private networks). */
+export async function resolveRedirects(target: string, allowPrivate: boolean): Promise<string> {
+  let url = await assertPublicUrl(target, allowPrivate);
+  for (let hop = 0; hop < 8; hop++) {
+    const res = await fetch(url, { method: 'GET', headers: { 'user-agent': UA }, redirect: 'manual' });
+    await res.body?.cancel();
+    const location = res.headers.get('location');
+    if (res.status < 300 || res.status >= 400 || !location) return url.toString();
+    url = await assertPublicUrl(new URL(location, url).toString(), allowPrivate);
+  }
+  return url.toString();
+}
+
 /**
  * Streaming media proxy for hosts that block cross-origin downloads (Drive, Dropbox, CDNs).
  * Every redirect hop is re-validated against private networks. Range requests are passed through.

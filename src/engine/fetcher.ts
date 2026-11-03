@@ -1,5 +1,6 @@
 import { directDownloadUrl, googleDriveId, needsServerResolver } from '../core/vyro';
-import { pickFrameioFile, resolveFrameioShare } from '../core/frameio';
+import { pickFrameioFile } from '../core/frameio';
+import { resolveShare } from './frameioClient';
 import type { MediaLink } from '../core/types';
 import type { AppSettings } from '../shared/settings';
 import { isExtensionPage } from '../shared/env';
@@ -125,7 +126,7 @@ export async function fetchMediaToOpfs(
     onProgress({ stage: 'resolving', loaded: 0, detail: 'Opening Frame.io share…' });
     let share;
     try {
-      share = await resolveFrameioShare(link.url, (input, init) => fetch(input, { ...init, signal }));
+      share = await resolveShare(link.url, settings, signal);
     } catch (err) {
       if ((err as Error).name === 'AbortError') throw err;
       throw new MediaFetchError((err as Error).message, 'Open the Frame.io link, download the video, then drop the file here.');

@@ -102,22 +102,30 @@ function graphqlError(json: unknown): string | undefined {
 }
 
 /** Follows f.io short links (and trailing redirects) to the canonical share URL. */
-export async function resolveFrameioUrl(url: string, fetchFn: FetchLike): Promise<string> {
+export async function resolveFrameioUrl(url: string, fetchFn: FetchLike, resolveRedirect?: (url: string) => Promise<string>): Promise<string> {
   if (frameioShareId(url)) return url;
   for (const method of ['HEAD', 'GET']) {
     try {
       const res = await fetchFn(url, { method, redirect: 'follow' });
       if (frameioShareId(res.url)) return res.url;
     } catch {
-      /* try next method */
+      /* CORS-blocked in web pages: fall through to the resolver */
     }
   }
-  throw new Error('Could not open the Frame.io link. Check that it is a public share link.');
+  if (resolveRedirect) {
+    const final = await resolveRedirect(url).catch(() => '');
+    if (frameioShareId(final)) return final;
+  }
+  throw new Error('Could not open the Frame.io short link from this browser. Use the extension, run the VyroClipper server, or paste the full next.frame.io/share/… link.');
 }
 
 /** Lists every file of a Frame.io share (recursing into folders) with signed download URLs. */
-export async function resolveFrameioShare(url: string, fetchFn: FetchLike = fetch, opts: { password?: string; maxFiles?: number } = {}): Promise<FrameioShare> {
-  const shareUrl = await resolveFrameioUrl(url, fetchFn);
+export async function resolveFrameioShare(
+  url: string,
+  fetchFn: FetchLike = fetch,
+  opts: { password?: string; maxFiles?: number; resolveRedirect?: (url: string) => Promise<string> } = {},
+): Promise<FrameioShare> {
+  const shareUrl = await resolveFrameioUrl(url, fetchFn, opts.resolveRedirect);
   const shareId = frameioShareId(shareUrl)!;
   const call = async (operation: string, query: string, variables: Json) => {
     const res = await fetchFn(FRAMEIO_GRAPHQL, { method: 'POST', headers: frameioHeaders(shareId, operation, opts.password), body: JSON.stringify({ operationName: operation, query, variables }) });

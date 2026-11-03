@@ -76,6 +76,17 @@ describe('frame.io share resolver', () => {
     expect(largestVideo.size).toBe(Math.max(...share.files.filter((f) => f.kind === 'video').map((f) => f.size!)));
   });
 
+  it('falls back to a redirect resolver when the browser blocks the short link (CORS)', async () => {
+    const { fn } = mockFetch();
+    const blocked = (async (input: string, init?: RequestInit) => {
+      if (input.startsWith('https://f.io/')) throw new TypeError('Failed to fetch');
+      return fn(input, init);
+    }) as typeof fetch;
+    await expect(resolveFrameioShare('https://f.io/Zz', blocked)).rejects.toThrow(/short link/);
+    const share = await resolveFrameioShare('https://f.io/Zz', blocked, { resolveRedirect: async () => `https://next.frame.io/share/${SHARE}/` });
+    expect(share.files.length).toBe(3);
+  });
+
   it('parses hydrate payloads defensively', () => {
     expect(parseHydrateResponse({ data: { share: { assets: { nodes: [{ id: 'x', name: 'a.png', __typename: 'ImageAsset', media: {} }] } } } })[0]).toEqual({ id: 'x', name: 'a.png', kind: 'image' });
     expect(parseHydrateResponse({})).toEqual([]);
