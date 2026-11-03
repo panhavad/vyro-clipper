@@ -155,6 +155,12 @@ export function ClipEditor({ projectId, clipId }: { projectId: string; clipId: s
           <div className="panel-body">
             {panel === 'captions' && (
               <>
+                {project.textScan?.captions && (
+                  <div className="callout small">
+                    This video already has captions burned in, so animated captions start off to avoid doubling them.
+                    {e.captionsEnabled ? ' Yours are on — make sure they don’t cover the originals (move them with “Vertical position”).' : ' Turn them on to add yours anyway.'}
+                  </div>
+                )}
                 <Toggle checked={e.captionsEnabled} onChange={(v) => setEdit({ captionsEnabled: v })} label={`Animated captions${rules.subtitlesRequired ? ' (required by campaign)' : ''}`} />
                 <StylePicker value={e.captionStyle} onChange={(id) => setEdit({ captionStyle: id })} />
                 <Slider label="Vertical position" min={0.12} max={0.9} step={0.01} value={e.captionY} onChange={(v) => setEdit({ captionY: v })} format={(v) => `${Math.round(v * 100)}%`} />

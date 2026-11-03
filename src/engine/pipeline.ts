@@ -5,11 +5,13 @@ import { buildSentences } from '../core/transcript';
 import type { Campaign, CampaignRules, Clip, Project, SourceMeta, Transcript } from '../core/types';
 import { detectByEnergy, detectViralMoments, type Candidate, type DetectOptions } from '../core/virality';
 import { defaultRules, effectiveRules } from '../core/vyro';
+import { EMPTY_TEXT_SCAN, editForSource } from '../core/textScan';
 import type { AppSettings } from '../shared/settings';
 import { analyzeFaces } from './faces';
 import { chatJson, llmConfig } from './llmClient';
 import { probeMedia } from './media';
 import { readMedia } from './storage';
+import { scanBurnedInText } from './textScan';
 import { transcribeFile } from './transcriber';
 
 export interface PipelineDeps {
@@ -71,7 +73,7 @@ export async function detectClips(project: Project & { meta: SourceMeta; transcr
     rangeEnd: gen.rangeEnd,
     silenceThreshold: edit.jumpCuts ? edit.silenceThreshold : undefined,
   };
-  const ctx: ClipFactoryContext = { projectId: project.id, campaignId: campaign?.id, rules, edit, words, sentences, sourceDuration: project.meta.duration };
+  const ctx: ClipFactoryContext = { projectId: project.id, campaignId: campaign?.id, rules, edit: editForSource(edit, project.textScan, project.meta), words, sentences, sourceDuration: project.meta.duration };
 
   const llm = gen.useLlm ? llmConfig(settings) : undefined;
   if (llm && sentences.length >= 6) {
@@ -127,6 +129,19 @@ export async function processProject(project: Project, deps: PipelineDeps): Prom
     await deps.update({ meta });
   }
 
+  let textScan = project.textScan;
+  if (!textScan && meta.hasVideo) {
+    await deps.update({ status: 'analyzing', progress: { step: 'Checking the video for burned-in captions', pct: 0 } });
+    try {
+      textScan = (await scanBurnedInText(file, meta.duration, { signal })) ?? EMPTY_TEXT_SCAN();
+    } catch (err) {
+      if ((err as Error).name === 'AbortError') throw err;
+      console.warn('Burned-in text scan failed', err);
+      textScan = EMPTY_TEXT_SCAN();
+    }
+    await deps.update({ textScan });
+  }
+
   let transcript = project.transcript;
   let envelope = project.envelope;
   if (!transcript) {
@@ -152,7 +167,7 @@ export async function processProject(project: Project, deps: PipelineDeps): Prom
   let clips = project.clips;
   if (!clips.length || deps.redetect) {
     await deps.update({ status: 'detecting', progress: { step: 'Finding viral moments', pct: 0 } });
-    clips = await detectClips({ ...project, meta, transcript, envelope }, deps);
+    clips = await detectClips({ ...project, meta, transcript, envelope, textScan }, deps);
     await deps.update({ clips });
   }
 

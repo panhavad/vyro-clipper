@@ -44,6 +44,7 @@ export function complianceFor(clip: Clip, project: Project, campaign: Campaign |
       postCaption: caption.text,
       transcriptLanguage: project.transcript?.language,
       fromCampaignMedia: campaign ? project.source.kind === 'url' && campaign.media.some((m) => m.url === project.source.url) : undefined,
+      burnedInCaptions: project.textScan?.captions,
     }),
     durationSec: plan.duration,
     caption,
@@ -64,6 +65,7 @@ async function renderInputs(project: Project, clip: Clip, settings: AppSettings,
     logo,
     music,
     envelope: project.envelope,
+    textBands: project.textScan?.bands,
     brandColors: [settings.brand.primaryColor, settings.brand.accentColor] as [string, string],
   };
 }

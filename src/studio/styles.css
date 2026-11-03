@@ -746,6 +746,16 @@ input[type='color'] {
   gap: 10px;
   align-items: center;
 }
+.share-thumb {
+  width: 64px;
+  height: 36px;
+  flex: none;
+  object-fit: cover;
+  border-radius: 6px;
+  background: var(--border);
+  display: grid;
+  place-items: center;
+}
 .campaign-card.locked {
   opacity: 0.6;
 }

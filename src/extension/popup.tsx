@@ -88,7 +88,11 @@ function Popup() {
             <label key={c.id} className={`item ${selected.has(c.id) ? 'on' : ''}`}>
               <input type="checkbox" checked={selected.has(c.id)} onChange={(e) => void toggle(c.id, e.target.checked)} />
               <div className="item-body">
-                <div className="name">{c.name}</div>
+                <div className="name">
+                  {c.name}
+                  {c.enrolled && <span className="tag good">Joined</span>}
+                  {c.locked && <span className="tag">🔒 Locked</span>}
+                </div>
                 <div className="muted small">
                   {c.brand ? `${c.brand} · ` : ''}
                   {c.cpm !== undefined ? `$${c.cpm.toFixed(2)}/1K` : ''} {r.minDurationSec ? `· ≥${r.minDurationSec}s` : ''} · {c.media.length} source{c.media.length === 1 ? '' : 's'}
@@ -126,6 +130,8 @@ input{font:inherit;color:#fff;background:#191926;border:1px solid #2c2c44;border
 .item.on{border-color:#7c3aed;background:rgba(124,58,237,.12)}
 .item input{width:16px;margin-top:2px;accent-color:#7c3aed}
 .name{font-weight:700}
+.tag{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:6px;font-size:10px;font-weight:700;background:#26263a;color:#c9c9dc;vertical-align:1px}
+.tag.good{background:rgba(34,197,94,.15);color:#4ade80}
 .status{background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.3);padding:8px;border-radius:10px;font-size:12px}
 .options{display:flex;flex-direction:column;gap:6px;padding:10px;border:1px solid #29293f;border-radius:12px}
 a{color:#22d3ee}`;

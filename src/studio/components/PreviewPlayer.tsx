@@ -81,10 +81,11 @@ export const PreviewPlayer = forwardRef<PlayerHandle, { project: Project; clip: 
         keywords: rulesFor(campaign).keywords,
         logo,
         envelope: project.envelope,
+        textBands: project.textScan?.bands,
         brandColors: [settings.brand.primaryColor, settings.brand.accentColor],
         scale: 0.5,
       }),
-    [clip, project.transcript, project.meta, project.envelope, videoDims, campaign, logo, settings.brand],
+    [clip, project.transcript, project.meta, project.envelope, project.textScan, videoDims, campaign, logo, settings.brand],
   );
 
   const draw = useCallback(() => {

@@ -6,6 +6,16 @@ export const FRAMEIO_GRAPHQL = 'https://api.frame.io/graphql';
 
 export type FrameioFileKind = 'video' | 'audio' | 'image' | 'other';
 
+export interface FrameioRendition {
+  /** Frame.io transcode key, e.g. h264_1080_best, h264_720 */
+  key: string;
+  width?: number;
+  height?: number;
+  size?: number;
+  /** Signed URL (expires) */
+  url: string;
+}
+
 export interface FrameioFile {
   id: string;
   name: string;
@@ -13,8 +23,14 @@ export interface FrameioFile {
   size?: number;
   width?: number;
   height?: number;
+  /** Seconds */
+  duration?: number;
+  mime?: string;
+  thumbnail?: string;
   /** Signed URL to the original upload (expires) */
   downloadUrl?: string;
+  /** Ready-made H.264 transcodes (much smaller than 4K / ProRes originals) */
+  renditions?: FrameioRendition[];
 }
 
 export interface FrameioShare {
@@ -58,7 +74,8 @@ const LIST_QUERY = `query VyroClipperShareList($shareId: ID!, $folderId: ID, $as
 
 const HYDRATE_QUERY = `query VyroClipperShareAssets($shareId: ID!, $ids: [ID!]!, $page: PageInput!) {
   share(by: {shareId: $shareId}) { assets(filter: {assetIds: $ids}, page: $page) { nodes { id name __typename
-    ... on VideoAsset { media { original { downloadUrl filesizeInBytes } metadata { originalWidth originalHeight } } }
+    ... on VideoAsset { thumbnailImageUrl { url } media { duration mimeType original { downloadUrl filesizeInBytes } metadata { originalWidth originalHeight }
+      videoTranscodes { key encodeStatus filesizeInBytes width height downloadUrl } } }
     ... on AudioAsset { media { original { downloadUrl filesizeInBytes } } }
     ... on ImageAsset { media { original { downloadUrl filesizeInBytes } } }
   } } }
@@ -92,8 +109,58 @@ export function parseHydrateResponse(json: unknown): FrameioFile[] {
     if (typeof url === 'string') file.downloadUrl = url;
     if (typeof w === 'number') file.width = w;
     if (typeof h === 'number') file.height = h;
+    const duration = get(n, 'media.duration');
+    const mime = get(n, 'media.mimeType');
+    const thumb = get(n, 'thumbnailImageUrl.url');
+    if (typeof duration === 'number' && duration > 0) file.duration = duration;
+    if (typeof mime === 'string') file.mime = mime;
+    if (typeof thumb === 'string') file.thumbnail = thumb;
+    const transcodes = (get(n, 'media.videoTranscodes') as Json[] | undefined) ?? [];
+    const renditions = transcodes
+      .filter((t) => t.encodeStatus === 'SUCCESS' && typeof t.downloadUrl === 'string' && /^h264_\d+/.test(String(t.key)))
+      .map((t) => {
+        const r: FrameioRendition = { key: String(t.key), url: String(t.downloadUrl) };
+        if (typeof t.width === 'number') r.width = t.width;
+        if (typeof t.height === 'number') r.height = t.height;
+        if (typeof t.filesizeInBytes === 'number') r.size = t.filesizeInBytes;
+        return r;
+      });
+    if (renditions.length) file.renditions = renditions;
     return file;
   });
+}
+
+/** Originals above this size are swapped for Frame.io's 1080p H.264 transcode. */
+export const MAX_ORIGINAL_BYTES = 2e9;
+
+/**
+ * Picks what to download for clipping: the original when the browser can decode it and it's a sensible
+ * size, otherwise Frame.io's 1080p (or 720p) H.264 transcode — e.g. an 11 GB 4K ProRes .mov becomes ~1.3 GB.
+ */
+export function chooseRendition(file: FrameioFile, maxOriginalBytes = MAX_ORIGINAL_BYTES): { url: string; size?: number; label: string } | undefined {
+  const longSide = Math.max(file.width ?? 0, file.height ?? 0);
+  const decodable = !file.mime || /mp4|m4v|webm/i.test(file.mime) || (!/quicktime|mxf|prores/i.test(file.mime) && !/\.(mov|mxf)$/i.test(file.name));
+  const originalOk = !!file.downloadUrl && decodable && longSide <= 1920 && (file.size ?? 0) <= maxOriginalBytes;
+  if (originalOk) return { url: file.downloadUrl!, size: file.size, label: 'original' };
+  const pick = (key: string) => file.renditions?.find((r) => r.key === key);
+  const proxy = pick('h264_1080_best') ?? pick('h264_1080') ?? pick('h264_720');
+  if (proxy) return { url: proxy.url, size: proxy.size, label: `${Math.min(proxy.width ?? 1080, proxy.height ?? 1080)}p H.264 copy` };
+  return file.downloadUrl ? { url: file.downloadUrl, size: file.size, label: 'original' } : undefined;
+}
+
+/** Long-form originals (episodes, streams) are where viral moments are mined; short pre-cut edits are not. */
+export function isLongForm(file: FrameioFile): boolean {
+  if (file.duration) return file.duration >= 180;
+  return (file.width ?? 0) > (file.height ?? 0) && (file.size ?? 0) >= 4e8;
+}
+
+/** Orders a share's videos for "clip this campaign": long-form originals first (by name), then short edits. */
+export function rankForClipping(files: FrameioFile[]): FrameioFile[] {
+  const videos = files.filter((f) => f.kind === 'video' && (f.downloadUrl || f.renditions?.length));
+  const byName = (a: FrameioFile, b: FrameioFile) => a.name.localeCompare(b.name, undefined, { numeric: true });
+  const long = videos.filter(isLongForm).sort(byName);
+  const short = videos.filter((f) => !isLongForm(f)).sort(byName);
+  return [...long, ...short];
 }
 
 function graphqlError(json: unknown): string | undefined {
@@ -161,8 +228,8 @@ export async function resolveFrameioShare(
   return { shareId, name, files };
 }
 
-/** Picks the file to clip when a share contains several (largest video first). */
+/** Picks the file to clip when a share contains several (first long-form original, else the first video). */
 export function pickFrameioFile(share: FrameioShare, fileId?: string): FrameioFile | undefined {
   if (fileId) return share.files.find((f) => f.id === fileId);
-  return [...share.files].filter((f) => f.kind === 'video' && f.downloadUrl).sort((a, b) => (b.size ?? 0) - (a.size ?? 0))[0];
+  return rankForClipping(share.files)[0];
 }

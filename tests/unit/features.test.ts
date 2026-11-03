@@ -36,6 +36,16 @@ describe('campaign-aware defaults + compliance', () => {
     expect(report.ok).toBe(false);
   });
 
+  it('accepts captions already burned into the source and warns before doubling them', () => {
+    const base = editSettingsForCampaign(defaultEditSettings(), campaign.rules);
+    const postCaption = buildPostCaption({ hookLine: 'x', rules: campaign.rules }).text;
+    const off = checkCompliance({ rules: campaign.rules, edit: { ...base, captionsEnabled: false }, durationSec: 42, postCaption, burnedInCaptions: true });
+    expect(off.items.find((i) => i.id === 'subtitles')).toMatchObject({ status: 'pass', detail: 'Already in the source video' });
+    expect(off.items.some((i) => i.id === 'double-captions')).toBe(false);
+    const both = checkCompliance({ rules: campaign.rules, edit: base, durationSec: 42, postCaption, burnedInCaptions: true });
+    expect(both.items.find((i) => i.id === 'double-captions')?.status).toBe('warn');
+  });
+
   it('keeps required caption parts within platform limits', () => {
     const caption = buildPostCaption({ hookLine: 'x'.repeat(400), rules: campaign.rules, extraHashtags: ['#a', '#b'] });
     expect(caption.variants.x.length).toBeLessThanOrEqual(280);

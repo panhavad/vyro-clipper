@@ -3,6 +3,7 @@ import { generateSettingsForCampaign } from '../core/defaults';
 import { shortId } from '../core/text';
 import type { Campaign, Clip, EditSettings, MediaLink, Project } from '../core/types';
 import { manualCampaign, mergeCampaign } from '../core/vyro';
+import { chooseRendition, isLongForm, rankForClipping } from '../core/frameio';
 import { resolveShare } from '../engine/frameioClient';
 import { fetchMediaToOpfs, MediaFetchError } from '../engine/fetcher';
 import { clipBaseName, downloadFiles, exportClipPackage, saveToDirectory, zipFiles, type ExportedFile } from '../engine/exportService';
@@ -395,14 +396,24 @@ export const useStudio = create<StudioState>((set, get) => {
         }
         try {
           const share = await resolveShare(link.url, get().settings);
-          const videos = share.files.filter((f) => f.kind === 'video' && f.downloadUrl).sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
-          if (!videos.length) {
+          const ranked = rankForClipping(share.files);
+          if (!ranked.length) {
             get().toast('error', `No downloadable videos in the Frame.io share of “${campaign.name}”.`, 'Open the link and download manually, then drop the file in the campaign.');
             continue;
           }
-          const fresh = videos.filter((v) => !existing.has(sourceKey(link.url, v.id)));
-          for (const v of fresh.slice(0, MAX_PER_SHARE)) expanded.push({ url: link.url, kind: 'frameio', fileId: v.id, label: v.name, size: v.size });
-          if (fresh.length > MAX_PER_SHARE) get().toast('info', `“${campaign.name}”: clipping ${MAX_PER_SHARE} of ${videos.length} videos. Pick more in Source videos.`);
+          // Full episodes are where viral moments come from; pre-cut shorts in the same share stay one click away.
+          const longForm = ranked.filter(isLongForm);
+          const pool = longForm.length ? longForm : ranked;
+          const fresh = pool.filter((v) => !existing.has(sourceKey(link.url, v.id)));
+          const picked = fresh.slice(0, MAX_PER_SHARE);
+          for (const v of picked) expanded.push({ url: link.url, kind: 'frameio', fileId: v.id, label: v.name, size: chooseRendition(v)?.size ?? v.size });
+          const skipped = ranked.filter((v) => !picked.includes(v) && !existing.has(sourceKey(link.url, v.id))).length;
+          if (picked.length && skipped > 0) {
+            get().toast(
+              'info',
+              `“${campaign.name}”: clipping ${picked.length} ${longForm.length ? 'full-length ' : ''}video${picked.length > 1 ? 's' : ''}. ${skipped} more ${longForm.length && ranked.length > longForm.length ? '(incl. pre-cut shorts) ' : ''}in Source videos.`,
+            );
+          }
         } catch (err) {
           get().toast('error', `Frame.io: ${(err as Error).message}`);
         }

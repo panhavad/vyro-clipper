@@ -11,6 +11,7 @@ import {
   getFirstEncodableVideoCodec,
 } from 'mediabunny';
 import { frameSchedule } from '../core/timeline';
+import type { TextBand } from '../core/textScan';
 import type { AudioEnvelope, Clip, SourceMeta, Word } from '../core/types';
 import { decodeAudioFile, decodeAudioRange } from './audio';
 import { buildClipAudio } from './audioMix';
@@ -27,6 +28,8 @@ export interface RenderOptions {
   logo?: ImageBitmap;
   music?: Blob;
   envelope?: AudioEnvelope;
+  /** Text already burned into the source, kept clear of overlays */
+  textBands?: TextBand[];
   brandColors?: [string, string];
   onProgress?: (pct: number, detail: string) => void;
   signal?: AbortSignal;
@@ -57,6 +60,7 @@ export async function renderClip(opts: RenderOptions): Promise<RenderResult> {
       keywords: opts.keywords,
       logo: opts.logo,
       envelope: opts.envelope,
+      textBands: opts.textBands,
       brandColors: opts.brandColors,
     });
     const { width, height } = rp;
@@ -158,6 +162,7 @@ export async function renderStill(opts: Omit<RenderOptions, 'onProgress' | 'sign
       keywords: opts.keywords,
       logo: opts.logo,
       envelope: opts.envelope,
+      textBands: opts.textBands,
       brandColors: opts.brandColors,
       scale: opts.scale ?? 0.5,
     });

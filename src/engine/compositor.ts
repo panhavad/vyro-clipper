@@ -3,6 +3,7 @@ import { planZooms, zoomAt, type ZoomPlan } from '../core/effects';
 import { cameraAt, computeCrop, outputSize } from '../core/reframe';
 import { outToSrc, planClip, remapWords, type TimelinePlan } from '../core/timeline';
 import { clamp } from '../core/text';
+import { placeAvoiding, type TextBand } from '../core/textScan';
 import type { AudioEnvelope, Clip, EditSettings, LayoutMode, Word } from '../core/types';
 
 export type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
@@ -24,6 +25,15 @@ export interface RenderPlan {
   logo?: ImageBitmap;
   envelope?: AudioEnvelope;
   brandColors: [string, string];
+  /** Burned-in source text in output coordinates (0..1) that overlays should not cover */
+  avoid: OutputBand[];
+}
+
+export interface OutputBand {
+  y0: number;
+  y1: number;
+  x0: number;
+  x1: number;
 }
 
 export interface RenderPlanInput {
@@ -34,9 +44,24 @@ export interface RenderPlanInput {
   keywords?: string[];
   logo?: ImageBitmap;
   envelope?: AudioEnvelope;
+  textBands?: TextBand[];
   brandColors?: [string, string];
   /** Preview renders at a lower resolution */
   scale?: number;
+}
+
+/** Maps source-frame text bands into the output frame for the (centre-cropped) fill layout. */
+export function bandsInOutput(bands: TextBand[] | undefined, srcW: number, srcH: number, aspect: number): OutputBand[] {
+  if (!bands?.length || srcW <= 0 || srcH <= 0) return [];
+  const crop = computeCrop(srcW, srcH, aspect, 0.5, 0.5, 1);
+  return bands
+    .map((b) => ({
+      y0: (b.y0 * srcH - crop.sy) / crop.sh,
+      y1: (b.y1 * srcH - crop.sy) / crop.sh,
+      x0: (b.x0 * srcW - crop.sx) / crop.sw,
+      x1: (b.x1 * srcW - crop.sx) / crop.sw,
+    }))
+    .filter((b) => b.y1 > 0 && b.y0 < 1 && b.x1 > 0 && b.x0 < 1);
 }
 
 export function resolveLayout(edit: EditSettings, clip: Clip, srcW: number, srcH: number, targetAspect: number): Exclude<LayoutMode, 'auto'> {
@@ -67,6 +92,7 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlan {
   const scale = input.scale ?? 1;
   const width = Math.round((size.width * scale) / 2) * 2;
   const height = Math.round((size.height * scale) / 2) * 2;
+  const layout = resolveLayout(edit, clip, input.srcW, input.srcH, width / height);
   return {
     clip,
     edit,
@@ -79,10 +105,11 @@ export function buildRenderPlan(input: RenderPlanInput): RenderPlan {
     height,
     srcW: input.srcW,
     srcH: input.srcH,
-    layout: resolveLayout(edit, clip, input.srcW, input.srcH, width / height),
+    layout,
     logo: input.logo,
     envelope: input.envelope,
     brandColors: input.brandColors ?? ['#7C3AED', '#0EA5E9'],
+    avoid: layout === 'fill' ? bandsInOutput(input.textBands, input.srcW, input.srcH, width / height) : [],
   };
 }
 
@@ -365,7 +392,10 @@ function drawOverlays(ctx: Ctx2D, rp: RenderPlan, t: number) {
     ctx.font = `900 ${size}px Montserrat, sans-serif`;
     const lines = wrapText(ctx, rp.clip.hook, W * 0.78).slice(0, 3);
     const bh = size * 1.2 * lines.length + 40 * k;
-    const cy = Math.max(topY + bh / 2 + 10 * k, H * 0.2);
+    let cy = Math.max(topY + bh / 2 + 10 * k, H * 0.2);
+    // Keep the hook off text that is already burned into the footage (titles, logos, captions).
+    const inTheWay = rp.avoid.filter((b) => b.x1 > 0.11 && b.x0 < 0.89);
+    if (inTheWay.length) cy = placeAvoiding(cy / H, bh / H, inTheWay, (topY + bh / 2) / H, 0.5) * H;
     ctx.translate(W / 2, cy);
     ctx.scale(0.6 + 0.4 * inP, 0.6 + 0.4 * inP);
     ctx.rotate((-2 * Math.PI) / 180);

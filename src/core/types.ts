@@ -1,5 +1,7 @@
 // Core domain model shared by the studio, the media engine and the Chrome extension.
 
+import type { TextScan } from './textScan';
+
 export type Platform = 'tiktok' | 'instagram' | 'youtube' | 'x';
 export const PLATFORMS: Platform[] = ['tiktok', 'instagram', 'youtube', 'x'];
 
@@ -312,6 +314,8 @@ export interface Project {
     storedAs?: string;
   };
   meta?: SourceMeta;
+  /** Text already burned into the source (captions, titles, logos) */
+  textScan?: TextScan;
   transcript?: Transcript;
   envelope?: AudioEnvelope;
   clips: Clip[];

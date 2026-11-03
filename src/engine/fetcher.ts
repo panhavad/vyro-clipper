@@ -1,5 +1,5 @@
 import { directDownloadUrl, googleDriveId, needsServerResolver } from '../core/vyro';
-import { pickFrameioFile } from '../core/frameio';
+import { chooseRendition, pickFrameioFile } from '../core/frameio';
 import { resolveShare } from './frameioClient';
 import type { MediaLink } from '../core/types';
 import type { AppSettings } from '../shared/settings';
@@ -132,11 +132,13 @@ export async function fetchMediaToOpfs(
       throw new MediaFetchError((err as Error).message, 'Open the Frame.io link, download the video, then drop the file here.');
     }
     const file = pickFrameioFile(share, link.fileId);
-    if (!file?.downloadUrl) {
+    const rendition = file ? chooseRendition(file) : undefined;
+    if (!file || !rendition) {
       throw new MediaFetchError('No downloadable video found in this Frame.io share (downloads may be disabled).', 'Open the link, download the file manually, then drop it here.');
     }
-    url = file.downloadUrl;
-    knownName = file.name;
+    url = rendition.url;
+    knownName = rendition.label === 'original' ? file.name : `${file.name.replace(/\.[a-z0-9]{2,4}$/i, '')}.mp4`;
+    if (rendition.label !== 'original') onProgress({ stage: 'resolving', loaded: 0, detail: `Using Frame.io's ${rendition.label} (original is too large or not browser-playable)` });
   }
 
   if (needsServerResolver(link.kind)) {

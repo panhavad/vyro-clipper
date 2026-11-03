@@ -39,7 +39,8 @@ export function candidateToClip(c: Candidate, ctx: ClipFactoryContext, extra?: P
   const now = Date.now();
   const range = ctx.rules.minDurationSec ? ensureMinDuration(c, ctx, ctx.rules.minDurationSec) : { start: c.start, end: c.end };
   const title = extra?.title?.trim() || makeTitle(c.text);
-  const hook = extra?.hook?.trim() ? extra.hook.trim().toUpperCase() : makeHookOverlay(makeTitle(c.text, 40), 42);
+  // The hook box wraps to up to three lines, so a whole question/sentence usually fits without "…".
+  const hook = extra?.hook?.trim() ? extra.hook.trim().toUpperCase() : makeHookOverlay(makeTitle(c.text, 52), 54);
   const caption = extra?.caption?.trim() || truncateWords(cleanSpokenText(title), 120);
   return {
     id: shortId('clip_'),

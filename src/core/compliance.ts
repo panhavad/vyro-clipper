@@ -10,6 +10,8 @@ export interface ComplianceInput {
   transcriptLanguage?: string;
   /** Whether the source footage came from the campaign's "Content to Use" links */
   fromCampaignMedia?: boolean;
+  /** The source video already has captions burned in */
+  burnedInCaptions?: boolean;
 }
 
 const PLATFORM_MAX: Record<Platform, number> = { youtube: 180, tiktok: 600, instagram: 180, x: 140 };
@@ -38,8 +40,11 @@ export function checkCompliance(input: ComplianceInput): ComplianceReport {
 
   add('aspect', `Format ${rules.aspectRatio}`, edit.aspect === rules.aspectRatio ? 'pass' : 'warn', edit.aspect !== rules.aspectRatio ? `Clip is ${edit.aspect}` : undefined);
 
-  if (rules.subtitlesRequired) add('subtitles', 'Subtitles burned in', edit.captionsEnabled ? 'pass' : 'fail');
+  const burnedIn = !!input.burnedInCaptions;
+  if (rules.subtitlesRequired) add('subtitles', 'Subtitles burned in', edit.captionsEnabled || burnedIn ? 'pass' : 'fail', !edit.captionsEnabled && burnedIn ? 'Already in the source video' : undefined);
   else if (edit.captionsEnabled) add('subtitles', 'Animated captions', 'pass');
+  else if (burnedIn) add('subtitles', 'Captions (already in the source video)', 'pass');
+  if (edit.captionsEnabled && burnedIn) add('double-captions', 'Source already has burned-in captions', 'warn', 'Your animated captions will double them; turn them off or move them.');
 
   if (rules.textOnScreen) {
     const ok = edit.onScreenText && norm(edit.onScreenTextValue).includes(norm(rules.textOnScreen));

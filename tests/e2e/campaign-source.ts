@@ -4,6 +4,7 @@
 // → wait for viral clips → export one → validate the MP4 against the campaign's minimum length.
 //
 // Usage: E2E_CAMPAIGN_JSON=catalog.json E2E_CAMPAIGN="Joy 101" STUDIO_URL=http://127.0.0.1:8090 node tests/e2e/campaign-source.ts
+// Optional: E2E_EXPECT_BURNED_IN=1|0 asserts whether the clipped source already has burned-in captions.
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { ALL_FORMATS, BufferSource, Input } from 'mediabunny';
@@ -85,6 +86,22 @@ async function main() {
     const chips = await page.locator('.clip-card .chips').allInnerTexts();
     titles.forEach((t, i) => log(`#${i + 1} ${scores[i]} — ${t} | ${chips[i]?.replace(/\s+/g, ' ')}`));
     const minLen = Number(/≥ (\d+)s/.exec(await page.locator('.chips').first().innerText())?.[1] ?? 0);
+    const burnedIn = await page.evaluate(() => {
+      type S = { projects: Array<{ textScan?: { captions: boolean; bands: Array<{ kind: string; y0: number; y1: number }> }; clips: Array<{ hook: string; edit: { captionsEnabled: boolean } }> }> };
+      const p = (window as unknown as { __vyroclipper: { getState: () => S } }).__vyroclipper.getState().projects[0]!;
+      return {
+        captions: p.textScan?.captions,
+        bands: p.textScan?.bands.map((b) => `${b.kind} ${b.y0.toFixed(2)}–${b.y1.toFixed(2)}`),
+        ourCaptions: p.clips.map((c) => c.edit.captionsEnabled),
+        hooks: p.clips.map((c) => c.hook),
+      };
+    });
+    log('burned-in text:', burnedIn);
+    if (process.env.E2E_EXPECT_BURNED_IN) {
+      const expected = process.env.E2E_EXPECT_BURNED_IN === '1';
+      assert(burnedIn.captions === expected, `burned-in captions detected = ${expected}`);
+      assert(burnedIn.ourCaptions.every((on) => on === !expected), 'animated captions follow the source (off over burned-in captions)');
+    }
 
     await page.locator('.clip-card').first().getByRole('button', { name: 'Edit' }).click();
     await page.locator('.player-stage canvas').waitFor();

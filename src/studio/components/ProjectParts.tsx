@@ -181,6 +181,7 @@ export function ProjectSection({ project, campaign }: { project: Project; campai
           <div className="muted small">
             {project.meta ? `${formatTime(project.meta.duration)} · ${project.meta.width}×${project.meta.height}` : project.source.url ?? project.source.fileName}
             {project.transcript ? ` · ${project.transcript.words.length.toLocaleString()} words` : ''}
+            {project.textScan?.captions ? ' · captions already burned in' : ''}
             {clips.length ? ` · ${clips.length} clips · avg score ${avg}` : ''}
           </div>
         </div>

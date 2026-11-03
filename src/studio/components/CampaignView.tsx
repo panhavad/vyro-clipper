@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { parseBrief } from '../../core/brief';
-import { type FrameioShare } from '../../core/frameio';
+import { chooseRendition, isLongForm, rankForClipping, type FrameioShare } from '../../core/frameio';
 import { resolveShare } from '../../engine/frameioClient';
 import type { Campaign, CampaignRules, MediaLink, Platform } from '../../core/types';
 import { PLATFORMS } from '../../core/types';
 import { classifyMediaUrl, effectiveRules, isDownloadable, needsServerResolver } from '../../core/vyro';
-import { normalizeHashtag } from '../../core/text';
+import { formatTime, normalizeHashtag } from '../../core/text';
 import { useCampaign } from '../hooks';
 import { useStudio } from '../store';
 import { PlatformIcons, RuleChips } from './CampaignsView';
@@ -116,30 +116,40 @@ function FrameioBrowser({ link, campaign, used, onClip }: { link: MediaLink; cam
       </div>
     );
   }
-  const files = state.share.files.filter((f) => f.kind === 'video' || f.kind === 'audio');
+  const ranked = rankForClipping(state.share.files);
+  const files = [...ranked, ...state.share.files.filter((f) => f.kind === 'audio')];
+  const hasLong = ranked.some(isLongForm);
   return (
     <div className="share-files">
       <div className="muted small">
         {state.share.name ?? 'Frame.io share'} · {files.length} file{files.length === 1 ? '' : 's'} · {formatBytes(files.reduce((n, f) => n + (f.size ?? 0), 0))}
+        {hasLong && ranked.some((f) => !isLongForm(f)) ? ' · full episodes first (pre-cut shorts below)' : ''}
       </div>
-      {files.map((f) => (
-        <div key={f.id} className="share-file">
-          <span className="media-url" title={f.name}>
-            {f.kind === 'audio' ? '🎧' : '🎬'} {f.name}
-          </span>
-          <span className="muted small">
-            {formatBytes(f.size)}
-            {f.width ? ` · ${f.width}×${f.height}` : ''}
-          </span>
-          {used.has(`${link.url}#${f.id}`) ? (
-            <Badge tone="accent">Added</Badge>
-          ) : (
-            <Button size="sm" kind="primary" disabled={!f.downloadUrl} title={f.downloadUrl ? undefined : 'Downloads are disabled for this file'} onClick={() => onClip({ url: link.url, kind: 'frameio', fileId: f.id, label: f.name, size: f.size })}>
-              ✂ Clip this
-            </Button>
-          )}
-        </div>
-      ))}
+      {files.map((f) => {
+        const pick = chooseRendition(f);
+        return (
+          <div key={f.id} className="share-file">
+            {f.thumbnail ? <img className="share-thumb" src={f.thumbnail} alt="" loading="lazy" crossOrigin="anonymous" /> : <span className="share-thumb">{f.kind === 'audio' ? '🎧' : '🎬'}</span>}
+            <span className="media-url" title={f.name}>
+              {f.name}
+            </span>
+            {f.kind === 'video' && <Badge tone={isLongForm(f) ? 'good' : 'default'}>{isLongForm(f) ? 'Full length' : 'Short edit'}</Badge>}
+            <span className="muted small" title={pick && pick.label !== 'original' ? `Original: ${formatBytes(f.size)}${f.mime ? ` (${f.mime})` : ''}` : undefined}>
+              {f.duration ? `${formatTime(f.duration)} · ` : ''}
+              {formatBytes(pick?.size ?? f.size)}
+              {f.width ? ` · ${f.width}×${f.height}` : ''}
+              {pick && pick.label !== 'original' ? ` · ${pick.label}` : ''}
+            </span>
+            {used.has(`${link.url}#${f.id}`) ? (
+              <Badge tone="accent">Added</Badge>
+            ) : (
+              <Button size="sm" kind="primary" disabled={!pick} title={pick ? undefined : 'Downloads are disabled for this file'} onClick={() => onClip({ url: link.url, kind: 'frameio', fileId: f.id, label: f.name, size: pick?.size ?? f.size })}>
+                ✂ Clip this
+              </Button>
+            )}
+          </div>
+        );
+      })}
       {!files.length && <span className="muted small">No video files in this share.</span>}
       <span className="muted small">Campaign: {campaign.name}</span>
     </div>

@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { FRAMEIO_GRAPHQL, frameioShareId, isFrameioUrl, parseHydrateResponse, pickFrameioFile, resolveFrameioShare } from '../../src/core/frameio';
+import {
+  FRAMEIO_GRAPHQL,
+  chooseRendition,
+  frameioShareId,
+  isFrameioUrl,
+  isLongForm,
+  parseHydrateResponse,
+  pickFrameioFile,
+  rankForClipping,
+  resolveFrameioShare,
+  type FrameioFile,
+} from '../../src/core/frameio';
 
 const SHARE = '420b7f6e-7019-4e7d-9609-c90124d0963a';
 
@@ -67,13 +78,74 @@ describe('frame.io share resolver', () => {
     expect(calls.some((c) => (c.variables.page as { after?: string }).after === 'c1')).toBe(true);
   });
 
-  it('picks the requested file or the largest video', async () => {
+  it('picks the requested file or the first video', async () => {
     const { fn } = mockFetch();
     const share = await resolveFrameioShare('https://f.io/AbCd', fn as typeof fetch);
-    expect(pickFrameioFile(share, 'f1')!.id).toBe('f1');
-    const largestVideo = pickFrameioFile(share)!;
-    expect(largestVideo.kind).toBe('video');
-    expect(largestVideo.size).toBe(Math.max(...share.files.filter((f) => f.kind === 'video').map((f) => f.size!)));
+    expect(pickFrameioFile(share, 'f2')!.id).toBe('f2');
+    const first = pickFrameioFile(share)!;
+    expect(first.kind).toBe('video');
+    expect(first.id).toBe('f1');
+  });
+
+  it('prefers full-length originals over pre-cut shorts', () => {
+    const files: FrameioFile[] = [
+      { id: 's1', name: 'Shorts-Clip-1.mp4', kind: 'video', duration: 54, width: 1080, height: 1920, downloadUrl: 'u' },
+      { id: 'e2', name: 'Seth Meyers.mp4', kind: 'video', duration: 3312, width: 1280, height: 720, downloadUrl: 'u' },
+      { id: 'e1', name: 'Harry Connick Jr.mp4', kind: 'video', duration: 2822, width: 1280, height: 720, downloadUrl: 'u' },
+      { id: 'a1', name: 'music.wav', kind: 'audio', downloadUrl: 'u' },
+      { id: 'n1', name: 'no-download.mp4', kind: 'video', duration: 999 },
+    ];
+    expect(rankForClipping(files).map((f) => f.id)).toEqual(['e1', 'e2', 's1']);
+    expect(isLongForm(files[0]!)).toBe(false);
+    // Without a duration, a big landscape file counts as long-form
+    expect(isLongForm({ id: 'x', name: 'x.mp4', kind: 'video', width: 1920, height: 1080, size: 8e8 })).toBe(true);
+  });
+
+  it("uses Frame.io's H.264 copy when the original is huge, 4K or ProRes", () => {
+    const renditions = [
+      { key: 'h264_2160', width: 3840, height: 2160, size: 4.1e9, url: 'r2160' },
+      { key: 'h264_1080_best', width: 1920, height: 1080, size: 1.3e9, url: 'r1080' },
+      { key: 'h264_720', width: 1280, height: 720, size: 8.2e8, url: 'r720' },
+    ];
+    const base = { id: 'x', kind: 'video' as const, downloadUrl: 'orig', renditions };
+    expect(chooseRendition({ ...base, name: 'ep.mp4', mime: 'video/mp4', width: 1280, height: 720, size: 1.03e9 })!.url).toBe('orig');
+    expect(chooseRendition({ ...base, name: 'solo.mov', mime: 'video/quicktime', width: 3840, height: 2160, size: 1.12e10 })).toMatchObject({ url: 'r1080', label: '1080p H.264 copy' });
+    expect(chooseRendition({ ...base, name: 'game.mp4', mime: 'video/mp4', width: 1920, height: 1080, size: 7.5e9 })!.url).toBe('r1080');
+    expect(chooseRendition({ ...base, name: 'ugc.mp4', mime: 'video/mp4', width: 2160, height: 3840, size: 7.5e8 })!.url).toBe('r1080');
+    expect(chooseRendition({ id: 'y', name: 'big.mp4', kind: 'video', downloadUrl: 'orig', size: 9e9 })!.url).toBe('orig');
+    expect(chooseRendition({ id: 'z', name: 'none.mp4', kind: 'video' })).toBeUndefined();
+  });
+
+  it('parses duration, thumbnail and successful H.264 transcodes', () => {
+    const [f] = parseHydrateResponse({
+      data: {
+        share: {
+          assets: {
+            nodes: [
+              {
+                id: 'v',
+                name: 'v.mov',
+                __typename: 'VideoAsset',
+                thumbnailImageUrl: { url: 'https://picture2.frame.io/t.webp' },
+                media: {
+                  duration: 1799.5,
+                  mimeType: 'video/quicktime',
+                  original: { downloadUrl: 'orig', filesizeInBytes: 1.1e10 },
+                  metadata: { originalWidth: 3840, originalHeight: 2160 },
+                  videoTranscodes: [
+                    { key: 'h264_1080_best', encodeStatus: 'SUCCESS', width: 1920, height: 1080, filesizeInBytes: 1.3e9, downloadUrl: 'r1080' },
+                    { key: 'h264_540', encodeStatus: 'FAILED', downloadUrl: 'bad' },
+                    { key: 'original', encodeStatus: 'UNKNOWN', downloadUrl: 'o' },
+                  ],
+                },
+              },
+            ],
+          },
+        },
+      },
+    });
+    expect(f).toMatchObject({ duration: 1799.5, mime: 'video/quicktime', thumbnail: 'https://picture2.frame.io/t.webp', width: 3840 });
+    expect(f!.renditions).toEqual([{ key: 'h264_1080_best', width: 1920, height: 1080, size: 1.3e9, url: 'r1080' }]);
   });
 
   it('falls back to a redirect resolver when the browser blocks the short link (CORS)', async () => {
