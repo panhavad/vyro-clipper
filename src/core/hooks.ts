@@ -102,13 +102,16 @@ export function makeHookOverlay(title: string, maxChars = 42, withEmoji = true):
   return emoji ? `${base}\u00A0${emoji}` : base;
 }
 
+/** Words that repeat a lot in speech but say nothing about the topic. */
+const GENERIC_HASHTAG_WORDS = new Set(['everybody', 'everyone', 'everything', 'somebody', 'someone', 'something', 'anybody', 'anyone', 'anything', 'nobody', 'nothing']);
+
 export function topicalHashtags(text: string, keywords: string[], max = 3): string[] {
   const fromKeywords = keywords
     .filter((k) => k.length <= 24 && !/\s{2,}/.test(k))
     .map((k) => normalizeHashtag(k.replace(/\s+/g, '')))
     .filter((h) => h.length > 3);
   const counts = new Map<string, number>();
-  for (const w of contentWords(text)) if (w.length > 4 && /^[a-z]+$/.test(w)) counts.set(w, (counts.get(w) ?? 0) + 1);
+  for (const w of contentWords(text)) if (w.length > 4 && /^[a-z]+$/.test(w) && !GENERIC_HASHTAG_WORDS.has(w)) counts.set(w, (counts.get(w) ?? 0) + 1);
   const fromText = [...counts.entries()]
     .filter(([, n]) => n >= 2)
     .sort((a, b) => b[1] - a[1])

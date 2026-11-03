@@ -44,6 +44,11 @@ describe('titles & hooks', () => {
     expect(tags).toContain('#Moonbase');
   });
 
+  it('never turns repeated generic words into hashtags', () => {
+    const tags = topicalHashtags('Everybody is excited about this, everybody is talking about rockets. Rockets, everyone! Everyone loves something, something big.', []);
+    expect(tags).toEqual(['#rockets']);
+  });
+
   it('keeps titles and hooks unique across a batch of clips (best clip keeps its own)', () => {
     const transcript = "Why'd you pick that date? Because my grandmother was born on that exact day in Louisiana.";
     const clip = (id: string, total: number): Clip => {

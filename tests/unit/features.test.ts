@@ -74,6 +74,18 @@ describe('posting schedule', () => {
     for (const n of perDay.values()) expect(n).toBeLessThanOrEqual(5);
     expect(toIcs(slots, { c0: 'caption' }, 'Camp')).toContain('BEGIN:VEVENT');
   });
+
+  it('writes RFC 5545 calendars: folded 75-octet lines, escaped text, CRLF only', () => {
+    const title = 'Everybody is Excited About This, Everybody is Talking About the Moon 🚀🌕 – Artemis';
+    const slots = planPosts([{ id: 'c1', title }], { accounts: [{ platform: 'tiktok', handle: 'me' }], platforms: ['tiktok'], start: new Date('2026-11-03T08:00:00') });
+    const ics = toIcs(slots, { c1: 'Line one\r\nLine two; with, punctuation #ad' }, 'Camp');
+    for (const line of ics.split('\r\n')) expect(new TextEncoder().encode(line).length).toBeLessThanOrEqual(75);
+    expect(ics).not.toMatch(/\r(?!\n)|(?<!\r)\n/);
+    expect(ics.endsWith('END:VCALENDAR\r\n')).toBe(true);
+    const unfolded = ics.replace(/\r\n /g, '');
+    expect(unfolded).toContain(`SUMMARY:Post on tiktok (@me): ${title.replace(/,/g, '\\,')}\r\n`);
+    expect(unfolded).toContain('Line one\\nLine two\\; with\\, punctuation #ad');
+  });
 });
 
 describe('magic commands', () => {

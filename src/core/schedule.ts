@@ -78,12 +78,33 @@ function icsDate(iso: string): string {
 }
 
 function icsEscape(s: string): string {
-  return s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\n/g, '\\n');
+  return s.replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r\n?|\n/g, '\\n');
+}
+
+/** RFC 5545 §3.1: lines over 75 octets are folded (CRLF + space), never inside a UTF-8 character. */
+function icsFold(line: string): string {
+  const parts: string[] = [];
+  let cur = '';
+  let octets = 0;
+  for (const ch of line) {
+    const cp = ch.codePointAt(0)!;
+    const n = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+    // Continuation lines start with the folding space, which counts towards their 75 octets.
+    if (octets + n > (parts.length ? 74 : 75)) {
+      parts.push(cur);
+      cur = '';
+      octets = 0;
+    }
+    cur += ch;
+    octets += n;
+  }
+  parts.push(cur);
+  return parts.join('\r\n ');
 }
 
 export function toIcs(slots: PostSlot[], captions: Record<string, string>, campaignName: string): string {
   const now = icsDate(new Date().toISOString());
-  const events = slots.map((s, i) => {
+  const events = slots.flatMap((s, i) => {
     const end = new Date(new Date(s.at).getTime() + 15 * 60000).toISOString();
     return [
       'BEGIN:VEVENT',
@@ -94,7 +115,8 @@ export function toIcs(slots: PostSlot[], captions: Record<string, string>, campa
       `SUMMARY:${icsEscape(`Post on ${s.platform} (@${s.handle}): ${s.clipTitle}`)}`,
       `DESCRIPTION:${icsEscape(`${campaignName}\n\n${captions[s.clipId] ?? ''}\n\nAfter posting, submit the live URL on Vyro.`)}`,
       'END:VEVENT',
-    ].join('\r\n');
+    ];
   });
-  return ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//VyroClipper//Posting plan//EN', 'CALSCALE:GREGORIAN', ...events, 'END:VCALENDAR'].join('\r\n');
+  const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//VyroClipper//Posting plan//EN', 'CALSCALE:GREGORIAN', ...events, 'END:VCALENDAR'];
+  return `${lines.map(icsFold).join('\r\n')}\r\n`;
 }
