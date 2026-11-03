@@ -1,10 +1,10 @@
 import { directDownloadUrl, googleDriveId, needsServerResolver } from '../core/vyro';
-import { chooseRendition, pickFrameioFile } from '../core/frameio';
+import { pickFrameioFile, renditionFallbacks } from '../core/frameio';
 import { resolveShare } from './frameioClient';
 import type { MediaLink } from '../core/types';
 import type { AppSettings } from '../shared/settings';
 import { isExtensionPage } from '../shared/env';
-import { writeMedia } from './storage';
+import { deleteMedia, writeMedia } from './storage';
 
 export interface FetchProgress {
   stage: 'resolving' | 'downloading' | 'server';
@@ -111,35 +111,78 @@ async function viaServerJob(link: MediaLink, settings: AppSettings, onProgress: 
   return file;
 }
 
+const isQuotaError = (err: unknown) => (err as DOMException | undefined)?.name === 'QuotaExceededError' || /quota/i.test(String((err as Error | undefined)?.message ?? ''));
+
+function storageError(size?: number): MediaFetchError {
+  return new MediaFetchError(
+    `Your browser ran out of storage for this video${size ? ` (${(size / 1e9).toFixed(2)} GB)` : ''}.`,
+    'Incognito windows only allow about 1 GB per site, so use a normal window. Otherwise delete finished projects or free up disk space, then retry.',
+  );
+}
+
+/** Streams a response into OPFS. A partial file is removed on failure. */
+async function saveResponse(res: Response, url: string, knownName: string | undefined, opts: { storedAs: string; onProgress: (p: FetchProgress) => void }): Promise<FetchedMedia> {
+  if (!res.body) throw new MediaFetchError('Empty response.', 'Try again.');
+  const total = Number(res.headers.get('content-length')) || undefined;
+  const mime = (res.headers.get('content-type') ?? 'video/mp4').split(';')[0]!.trim();
+  const name = knownName ?? nameFromResponse(res, url);
+  const storedAs = `${opts.storedAs}.${extFromMime(mime, name || url)}`;
+  try {
+    const file = await writeMedia(storedAs, res.body, (loaded) => opts.onProgress({ stage: 'downloading', loaded, total, detail: 'Downloading…' }));
+    return { file, storedAs, mime, size: file.size, name };
+  } catch (err) {
+    await deleteMedia(storedAs).catch(() => undefined);
+    throw err;
+  }
+}
+
+/** Frame.io: the best playable copy, falling back to smaller H.264 copies when browser storage runs out. */
+async function fetchFrameio(link: MediaLink, opts: { settings: AppSettings; storedAs: string; onProgress: (p: FetchProgress) => void; signal?: AbortSignal }): Promise<FetchedMedia> {
+  const { settings, onProgress, signal } = opts;
+  onProgress({ stage: 'resolving', loaded: 0, detail: 'Opening Frame.io share…' });
+  let share;
+  try {
+    share = await resolveShare(link.url, settings, signal);
+  } catch (err) {
+    if ((err as Error).name === 'AbortError') throw err;
+    throw new MediaFetchError((err as Error).message, 'Open the Frame.io link, download the video, then drop the file here.');
+  }
+  const file = pickFrameioFile(share, link.fileId);
+  const ladder = file ? renditionFallbacks(file) : [];
+  if (!file || !ladder.length) {
+    throw new MediaFetchError('No downloadable video found in this Frame.io share (downloads may be disabled).', 'Open the link, download the file manually, then drop it here.');
+  }
+  const init: RequestInit = { signal, credentials: 'omit', redirect: 'follow' };
+  for (let i = 0; i < ladder.length; i++) {
+    const pick = ladder[i]!;
+    const res =
+      (await tryFetch(pick.url, init)) ??
+      (!isExtensionPage() ? await tryFetch(`${serverBase(settings)}/api/proxy?url=${encodeURIComponent(pick.url)}`, { ...init, headers: serverHeaders(settings) }) : undefined);
+    if (!res) throw new MediaFetchError('Frame.io refused the download (the link may have expired).', 'Reopen the campaign and try again, or download the file manually and drop it here.');
+    const name = pick.label === 'original' ? file.name : `${file.name.replace(/\.[a-z0-9]{2,4}$/i, '')}.mp4`;
+    const note = pick.label === 'original' ? undefined : `Frame.io ${pick.label}${i > 0 ? ' (browser storage was full)' : ''}`;
+    try {
+      return await saveResponse(res, pick.url, name, { storedAs: opts.storedAs, onProgress: (p) => onProgress(note ? { ...p, detail: note } : p) });
+    } catch (err) {
+      if (!isQuotaError(err)) throw err;
+      const next = ladder[i + 1];
+      if (!next) throw storageError(pick.size);
+      onProgress({ stage: 'resolving', loaded: 0, detail: `Not enough browser storage for the ${pick.label} — using the ${next.label} instead` });
+    }
+  }
+  throw storageError();
+}
+
 /** Downloads a campaign media link into OPFS using the best available route. */
 export async function fetchMediaToOpfs(
   link: MediaLink,
   opts: { settings: AppSettings; storedAs: string; onProgress: (p: FetchProgress) => void; signal?: AbortSignal },
 ): Promise<FetchedMedia> {
   const { settings, onProgress, signal } = opts;
+  if (link.kind === 'frameio') return fetchFrameio(link, opts);
   onProgress({ stage: 'resolving', loaded: 0, detail: 'Resolving link…' });
   let res: Response | undefined;
   let url = directDownloadUrl(link);
-  let knownName: string | undefined;
-
-  if (link.kind === 'frameio') {
-    onProgress({ stage: 'resolving', loaded: 0, detail: 'Opening Frame.io share…' });
-    let share;
-    try {
-      share = await resolveShare(link.url, settings, signal);
-    } catch (err) {
-      if ((err as Error).name === 'AbortError') throw err;
-      throw new MediaFetchError((err as Error).message, 'Open the Frame.io link, download the video, then drop the file here.');
-    }
-    const file = pickFrameioFile(share, link.fileId);
-    const rendition = file ? chooseRendition(file) : undefined;
-    if (!file || !rendition) {
-      throw new MediaFetchError('No downloadable video found in this Frame.io share (downloads may be disabled).', 'Open the link, download the file manually, then drop it here.');
-    }
-    url = rendition.url;
-    knownName = rendition.label === 'original' ? file.name : `${file.name.replace(/\.[a-z0-9]{2,4}$/i, '')}.mp4`;
-    if (rendition.label !== 'original') onProgress({ stage: 'resolving', loaded: 0, detail: `Using Frame.io's ${rendition.label} (original is too large or not browser-playable)` });
-  }
 
   if (needsServerResolver(link.kind)) {
     res = await viaServerJob(link, settings, onProgress, signal);
@@ -178,10 +221,10 @@ export async function fetchMediaToOpfs(
   }
 
   if (!res.body) throw new MediaFetchError('Empty response.', 'Try again.');
-  const total = Number(res.headers.get('content-length')) || undefined;
-  const mime = (res.headers.get('content-type') ?? 'video/mp4').split(';')[0]!.trim();
-  const name = knownName ?? nameFromResponse(res, url);
-  const storedAs = `${opts.storedAs}.${extFromMime(mime, name || url)}`;
-  const file = await writeMedia(storedAs, res.body, (loaded) => onProgress({ stage: 'downloading', loaded, total, detail: 'Downloading…' }));
-  return { file, storedAs, mime, size: file.size, name };
+  try {
+    return await saveResponse(res, url, undefined, { storedAs: opts.storedAs, onProgress });
+  } catch (err) {
+    if (isQuotaError(err)) throw storageError(Number(res.headers.get('content-length')) || undefined);
+    throw err;
+  }
 }

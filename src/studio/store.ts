@@ -220,7 +220,10 @@ export const useStudio = create<StudioState>((set, get) => {
           signal: controller.signal,
           onProgress: (p) => {
             const pct = p.total ? (p.loaded / p.total) * 100 : p.stage === 'server' ? p.loaded : 0;
-            const detail = p.stage === 'downloading' ? `${(p.loaded / 1e6).toFixed(1)} MB${p.total ? ` / ${(p.total / 1e6).toFixed(1)} MB` : ''}` : p.detail;
+            const detail =
+              p.stage === 'downloading'
+                ? `${(p.loaded / 1e6).toFixed(1)} MB${p.total ? ` / ${(p.total / 1e6).toFixed(1)} MB` : ''}${p.detail && p.detail !== 'Downloading…' ? ` · ${p.detail}` : ''}`
+                : p.detail;
             void get().updateProject(id, { progress: { step: 'Downloading source video', pct, detail } }, false);
           },
         });

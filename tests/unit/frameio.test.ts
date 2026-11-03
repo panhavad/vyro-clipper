@@ -8,6 +8,7 @@ import {
   parseHydrateResponse,
   pickFrameioFile,
   rankForClipping,
+  renditionFallbacks,
   resolveFrameioShare,
   type FrameioFile,
 } from '../../src/core/frameio';
@@ -114,6 +115,28 @@ describe('frame.io share resolver', () => {
     expect(chooseRendition({ ...base, name: 'ugc.mp4', mime: 'video/mp4', width: 2160, height: 3840, size: 7.5e8 })!.url).toBe('r1080');
     expect(chooseRendition({ id: 'y', name: 'big.mp4', kind: 'video', downloadUrl: 'orig', size: 9e9 })!.url).toBe('orig');
     expect(chooseRendition({ id: 'z', name: 'none.mp4', kind: 'video' })).toBeUndefined();
+  });
+
+  it('falls back to progressively smaller H.264 copies (for when browser storage runs out)', () => {
+    const f: FrameioFile = {
+      id: 'e',
+      name: 'Harry Connick Jr.mp4',
+      kind: 'video',
+      mime: 'video/mp4',
+      width: 1280,
+      height: 720,
+      size: 1.03e9,
+      downloadUrl: 'orig',
+      renditions: [
+        { key: 'h264_1080_best', width: 1280, height: 720, size: 1.2e9, url: 'r1080' },
+        { key: 'h264_360', width: 640, height: 360, size: 2e8, url: 'r360' },
+        { key: 'h264_720', width: 1280, height: 720, size: 6e8, url: 'r720' },
+        { key: 'h264_540', width: 960, height: 540, size: 4e8, url: 'r540' },
+      ],
+    };
+    expect(renditionFallbacks(f).map((r) => r.url)).toEqual(['orig', 'r720', 'r540', 'r360']);
+    expect(renditionFallbacks(f)[1]!.label).toBe('720p H.264 copy');
+    expect(renditionFallbacks({ id: 'z', name: 'z.mp4', kind: 'video' })).toEqual([]);
   });
 
   it('parses duration, thumbnail and successful H.264 transcodes', () => {

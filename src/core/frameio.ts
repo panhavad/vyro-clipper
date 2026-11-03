@@ -133,19 +133,42 @@ export function parseHydrateResponse(json: unknown): FrameioFile[] {
 /** Originals above this size are swapped for Frame.io's 1080p H.264 transcode. */
 export const MAX_ORIGINAL_BYTES = 2e9;
 
+export interface FrameioDownload {
+  url: string;
+  size?: number;
+  label: string;
+}
+
+const renditionLabel = (r: FrameioRendition) => `${Math.min(r.width ?? 1080, r.height ?? 1080)}p H.264 copy`;
+const renditionLines = (r: FrameioRendition) => Number(/^h264_(\d+)/.exec(r.key)?.[1] ?? 0);
+
 /**
  * Picks what to download for clipping: the original when the browser can decode it and it's a sensible
  * size, otherwise Frame.io's 1080p (or 720p) H.264 transcode — e.g. an 11 GB 4K ProRes .mov becomes ~1.3 GB.
  */
-export function chooseRendition(file: FrameioFile, maxOriginalBytes = MAX_ORIGINAL_BYTES): { url: string; size?: number; label: string } | undefined {
+export function chooseRendition(file: FrameioFile, maxOriginalBytes = MAX_ORIGINAL_BYTES): FrameioDownload | undefined {
   const longSide = Math.max(file.width ?? 0, file.height ?? 0);
   const decodable = !file.mime || /mp4|m4v|webm/i.test(file.mime) || (!/quicktime|mxf|prores/i.test(file.mime) && !/\.(mov|mxf)$/i.test(file.name));
   const originalOk = !!file.downloadUrl && decodable && longSide <= 1920 && (file.size ?? 0) <= maxOriginalBytes;
   if (originalOk) return { url: file.downloadUrl!, size: file.size, label: 'original' };
   const pick = (key: string) => file.renditions?.find((r) => r.key === key);
   const proxy = pick('h264_1080_best') ?? pick('h264_1080') ?? pick('h264_720');
-  if (proxy) return { url: proxy.url, size: proxy.size, label: `${Math.min(proxy.width ?? 1080, proxy.height ?? 1080)}p H.264 copy` };
+  if (proxy) return { url: proxy.url, size: proxy.size, label: renditionLabel(proxy) };
   return file.downloadUrl ? { url: file.downloadUrl, size: file.size, label: 'original' } : undefined;
+}
+
+/**
+ * The preferred download followed by progressively smaller H.264 copies (≥ 360p), used when the browser
+ * runs out of storage (e.g. incognito windows cap site storage at ~1 GB).
+ */
+export function renditionFallbacks(file: FrameioFile): FrameioDownload[] {
+  const first = chooseRendition(file);
+  if (!first) return [];
+  const smaller = (file.renditions ?? [])
+    .filter((r) => r.url !== first.url && renditionLines(r) >= 360 && (first.size === undefined || r.size === undefined || r.size < first.size))
+    .sort((a, b) => renditionLines(b) - renditionLines(a))
+    .map((r) => ({ url: r.url, size: r.size, label: renditionLabel(r) }));
+  return [first, ...smaller];
 }
 
 /** Long-form originals (episodes, streams) are where viral moments are mined; short pre-cut edits are not. */

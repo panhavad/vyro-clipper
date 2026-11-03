@@ -4,7 +4,8 @@
 // → wait for viral clips → export one → validate the MP4 against the campaign's minimum length.
 //
 // Usage: E2E_CAMPAIGN_JSON=catalog.json E2E_CAMPAIGN="Joy 101" STUDIO_URL=http://127.0.0.1:8090 node tests/e2e/campaign-source.ts
-// Optional: E2E_EXPECT_BURNED_IN=1|0 asserts whether the clipped source already has burned-in captions.
+// Optional: E2E_EXPECT_BURNED_IN=1|0 asserts whether the clipped source already has burned-in captions;
+// E2E_FILE="Harry Connick" clips a specific file instead of the smallest one.
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { ALL_FORMATS, BufferSource, Input } from 'mediabunny';
@@ -60,11 +61,13 @@ async function main() {
     files.forEach((f, i) => {
       if (mb(f) < mb(files[best]!)) best = i;
     });
+    if (process.env.E2E_FILE) best = files.findIndex((f) => f.includes(process.env.E2E_FILE!));
+    assert(best >= 0, `file containing “${process.env.E2E_FILE}” is listed`);
     await page.locator('.share-file').nth(best).getByRole('button', { name: '✂ Clip this' }).click();
     log('clipping:', files[best]!.replace(/\s+/g, ' ').slice(0, 90));
     await page.getByRole('button', { name: /^Clips/ }).click();
     let last = '';
-    const deadline = Date.now() + 30 * 60 * 1000;
+    const deadline = Date.now() + Number(process.env.E2E_TIMEOUT_MIN ?? 30) * 60 * 1000;
     for (;;) {
       if (Date.now() > deadline) throw new Error('timeout');
       const err = await page.locator('.project .callout.error').first().textContent({ timeout: 300 }).catch(() => null);
