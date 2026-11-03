@@ -1,0 +1,20 @@
+{
+  // Node-side TypeScript (server, supervisor, build scripts, e2e runner).
+  // Runs directly with `node file.ts` (native type stripping), so only erasable syntax is allowed.
+  "compilerOptions": {
+    "target": "esnext",
+    "lib": ["esnext"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "strict": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "moduleDetection": "force",
+    "skipLibCheck": true
+  },
+  "include": ["server", "scripts", "tests/e2e", "vite.config.ts", "vitest.config.ts"]
+}

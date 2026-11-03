@@ -1,0 +1,9 @@
+node_modules
+dist
+build
+coverage
+tests/e2e/.artifacts
+tests/e2e/.profile
+*.log
+.env
+.env.*

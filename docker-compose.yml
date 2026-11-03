@@ -1,0 +1,37 @@
+# VyroClipper — `docker compose up -d --build`, then open http://localhost:8080
+#
+# Auto-update: the container watches a git repo and redeploys on every new commit
+# (pull → npm ci if needed → build → swap release → restart). Browsers pick up the new
+# client-side build automatically; the unpacked Chrome extension in ./build/extension reloads itself.
+services:
+  vyroclipper:
+    build:
+      context: .
+      args:
+        GIT_COMMIT: ${GIT_COMMIT:-}
+    image: vyroclipper:latest
+    container_name: vyroclipper
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      AUTO_UPDATE: "true"
+      # Watch this repository (mounted below): every local `git commit` on GIT_BRANCH is deployed.
+      REPO_DIR: /repo
+      # …or watch a remote repository instead (GitHub/GitLab/Gitea). Takes precedence over REPO_DIR.
+      GIT_REPO_URL: ${GIT_REPO_URL:-}
+      GIT_BRANCH: ${GIT_BRANCH:-main}
+      GIT_POLL_SECONDS: ${GIT_POLL_SECONDS:-30}
+      # Optional push webhook: POST /api/hooks/git (GitHub X-Hub-Signature-256, GitLab X-Gitlab-Token, or ?secret=)
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      # Optional shared secret for /api/proxy and /api/media/* (set the same token in the studio Settings)
+      API_TOKEN: ${API_TOKEN:-}
+      # Latest extension build is copied here for "Load unpacked"
+      EXTENSION_EXPORT_DIR: /export/extension
+    volumes:
+      - ./:/repo:ro
+      - vyroclipper-data:/data
+      - ./build/extension:/export/extension
+    restart: unless-stopped
+
+volumes:
+  vyroclipper-data:

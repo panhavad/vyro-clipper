@@ -1,0 +1,31 @@
+{
+  // Client code (studio web app + Chrome extension), bundled by Vite.
+  // Server code and build scripts use tsconfig.node.json.
+  "compilerOptions": {
+    // Environment Settings
+    "target": "es2023",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "types": ["vite/client", "chrome"],
+    "jsx": "react-jsx",
+    "resolveJsonModule": true,
+
+    // Vite does the emitting; tsc only type-checks.
+    "noEmit": true,
+
+    // Stricter Typechecking Options
+    "strict": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+
+    // Recommended Options
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "noUncheckedSideEffectImports": true,
+    "moduleDetection": "force",
+    "useDefineForClassFields": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "tests/unit"]
+}
