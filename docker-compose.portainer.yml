@@ -19,7 +19,15 @@ services:
       API_TOKEN: ${API_TOKEN:-}
     volumes:
       - vyroclipper-data:/data
+    networks:
+      - tunnel_net
     restart: unless-stopped
+
+networks:
+  # Shared with the Cloudflare tunnel container; must exist first: docker network create tunnel_net
+  tunnel_net:
+    external: true
+    name: ${TUNNEL_NETWORK:-tunnel_net}
 
 volumes:
   vyroclipper-data:
