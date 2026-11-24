@@ -7,6 +7,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from 'node:ht
 import { extname, join, normalize, relative, resolve, sep } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { zipSync } from 'fflate';
+import { extensionReleasePage, insecureDownloadPage, isBlockedInsecureDownload } from './extensionDownload.ts';
 import { proxyMedia, resolveRedirects } from './proxy.ts';
 import { HttpError, envBool, envInt, log } from './util.ts';
 import { MediaJobs } from './ytdlp.ts';
@@ -19,6 +20,7 @@ const EXTENSION_DIR = resolve(process.env.EXTENSION_DIR ?? join(STATIC_DIR, '..'
 const API_TOKEN = process.env.API_TOKEN ?? '';
 const WEBHOOK_SECRET = process.env.WEBHOOK_SECRET ?? '';
 const ALLOW_PRIVATE = envBool('ALLOW_PRIVATE_NETWORK', false);
+const EXTENSION_DOWNLOAD_PAGE = process.env.EXTENSION_DOWNLOAD_PAGE || extensionReleasePage(process.env.GIT_REPO_URL);
 const startedAt = new Date().toISOString();
 
 const jobs = new MediaJobs({
@@ -254,6 +256,11 @@ const server = createServer((req, res) => {
     try {
       if (isApi) return await handleApi(req, res, url);
       if (url.pathname === '/extension.zip') {
+        if (!url.searchParams.has('force') && isBlockedInsecureDownload(req)) {
+          const html = insecureDownloadPage({ releasePage: EXTENSION_DOWNLOAD_PAGE, host: req.headers.host ?? '' });
+          res.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' });
+          return void res.end(html);
+        }
         if (!existsSync(join(EXTENSION_DIR, 'manifest.json'))) throw new HttpError(404, 'Extension build not found');
         const zip = zipDirectory(EXTENSION_DIR);
         res.writeHead(200, { 'content-type': 'application/zip', 'content-disposition': 'attachment; filename="vyroclipper-extension.zip"', 'content-length': zip.length, 'cache-control': 'no-store' });

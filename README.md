@@ -61,7 +61,8 @@ The compose file mounts this repository read-only at `/repo` and enables **auto-
 
 ### 2. Chrome extension
 
-1. `npm install && npm run build` (or use the auto-exported `build/extension` folder from Docker, or download `http://localhost:8080/extension.zip`).
+1. `npm install && npm run build` (or use the auto-exported `build/extension` folder from Docker, download `http://localhost:8080/extension.zip`, or grab `vyroclipper-extension.zip` from the [`extension-latest` release](https://github.com/panhavad/vyro-clipper/releases/tag/extension-latest), which CI rebuilds on every push to `main`).
+   > Chrome blocks downloads from plain-HTTP sites other than localhost (*“the file may have been tampered with”*). The zip is safe. When the studio is opened as `http://<server-ip>:8019`, `/extension.zip` shows a page that links to the HTTPS GitHub release instead. To download directly from your server, give it an HTTPS hostname (e.g. a Cloudflare tunnel).
 2. Chrome → `chrome://extensions` → enable **Developer mode** → **Load unpacked** → select `dist/extension` (or `build/extension`).
 3. Open <https://app.vyro.com> and log in. A small ✂ VyroClipper panel appears: **Sync all** imports every campaign; on a campaign page click **✂ Clip this campaign**.
 4. The extension popup lists captured campaigns — tick the ones you want and press **Clip selected**. The studio opens (bundled, or your hosted Docker studio if set in the popup ⚙).
@@ -118,6 +119,7 @@ git commit ─▶ poll (GIT_POLL_SECONDS) or POST /api/hooks/git ─▶ git fetc
 | `WEBHOOK_SECRET` | – | Enables `POST /api/hooks/git` |
 | `API_TOKEN` | – | Protects `/api/proxy` and `/api/media/*` (`x-vyroclipper-token`) |
 | `EXTENSION_EXPORT_DIR` | – | Copy each extension build here (compose: `./build/extension`) |
+| `EXTENSION_DOWNLOAD_PAGE` | GitHub `extension-latest` release of `GIT_REPO_URL` | HTTPS download page offered when `/extension.zip` is opened over plain HTTP |
 | `ALLOW_PRIVATE_NETWORK` | `false` | Allow the proxy to reach private IPs (SSRF guard) |
 | `MEDIA_CACHE_MAX_GB` / `MEDIA_CACHE_TTL_HOURS` | `10` / `24` | yt-dlp download cache |
 
