@@ -1,0 +1,25 @@
+# VyroClipper on a remote Docker host (e.g. a Portainer Git stack, compose path: docker-compose.portainer.yml)
+#
+# Unlike docker-compose.yml, nothing is bind-mounted from the host: the image is built from this repository
+# and the container's supervisor keeps itself up to date by watching GIT_REPO_URL (pull → build → swap release).
+services:
+  vyroclipper:
+    build:
+      context: .
+    image: vyroclipper:latest
+    container_name: vyroclipper
+    ports:
+      - "${PORT:-8019}:8080"
+    environment:
+      AUTO_UPDATE: "true"
+      GIT_REPO_URL: ${GIT_REPO_URL:-https://github.com/panhavad/vyro-clipper.git}
+      GIT_BRANCH: ${GIT_BRANCH:-main}
+      GIT_POLL_SECONDS: ${GIT_POLL_SECONDS:-60}
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      API_TOKEN: ${API_TOKEN:-}
+    volumes:
+      - vyroclipper-data:/data
+    restart: unless-stopped
+
+volumes:
+  vyroclipper-data:

@@ -57,6 +57,8 @@ docker compose up -d --build        # http://localhost:8080   (PORT=8090 docker 
 
 The compose file mounts this repository read-only at `/repo` and enables **auto-update**: every commit on `main` is pulled, built and deployed automatically (see below). Data (releases, media cache) lives in the `vyroclipper-data` volume.
 
+**Remote host / Portainer:** create a *Git repository* stack from `https://github.com/panhavad/vyro-clipper` with compose path `docker-compose.portainer.yml`. It publishes port `8019` (override with `PORT`) and the container watches the GitHub repo itself, so every push to `main` is deployed without redeploying the stack.
+
 ### 2. Chrome extension
 
 1. `npm install && npm run build` (or use the auto-exported `build/extension` folder from Docker, or download `http://localhost:8080/extension.zip`).
